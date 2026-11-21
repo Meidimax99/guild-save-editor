@@ -297,6 +297,9 @@ impl Session {
     /// Add a copy. A byte-identical copy of an already loaded player is
     /// kept as a twin (edited along with it) and reported as `Ok(false)`.
     pub fn add(&mut self, c: Copy) -> Result<bool> {
+        if self.all_copies().any(|x| x.sav.path == c.sav.path) {
+            bail!("{} is already loaded", c.sav.path.display());
+        }
         if c.key() == self.key
             && let Some(have) = self.copies.iter_mut().find(|x| x.owner.is_some() && x.owner == c.owner && x.sav.raw == c.sav.raw)
         {
@@ -312,15 +315,51 @@ impl Session {
     pub fn add_file(&mut self, path: &Path) -> Result<String> {
         let root = self.root.clone();
         let c = Copy::load(path, root.as_deref().filter(|r| path.starts_with(r)))?;
-        if self.all_copies().any(|x| x.sav.path == c.sav.path) {
-            bail!("{} is already loaded", path.display());
-        }
         let name = c.owner_name();
         Ok(if self.add(c)? {
             format!("added copy of {name}")
         } else {
             format!("identical to the loaded copy of {name}; it will be edited too")
         })
+    }
+
+    /// Add the copies of this save found by scanning a folder; returns one
+    /// log line per file (copies of other saves are summarised).
+    pub fn add_scanned(&mut self, res: ScanResult) -> Vec<String> {
+        let mut log: Vec<String> = res.errors.into_iter().map(|e| format!("error: skipped {e}")).collect();
+        let mut other = Vec::new();
+        let mut added = 0;
+        for f in res.found {
+            if f.key != self.key {
+                other.push(format!("“{}” ({}, {} file(s))", f.name(), date_text(&f.copies[0].sav), f.copies.len()));
+                continue;
+            }
+            for c in f.copies {
+                let (path, name) = (c.sav.path.clone(), c.owner_name());
+                match self.add(c) {
+                    Ok(true) => {
+                        added += 1;
+                        log.push(format!("{}: added copy of {name}", path.display()));
+                    }
+                    Ok(false) => log.push(format!("{}: identical to the loaded copy of {name}; it will be edited too", path.display())),
+                    Err(e) => log.push(format!("error: {e:#}")),
+                }
+            }
+        }
+        if !other.is_empty() {
+            log.push(format!("ignored copies of other saves: {}", other.join(", ")));
+        }
+        log.push(format!("{added} new player cop(ies) added"));
+        log
+    }
+
+    /// Add a file, or every matching copy below a folder.
+    pub fn add_path(&mut self, path: &Path) -> Result<Vec<String>> {
+        if path.is_dir() {
+            Ok(self.add_scanned(scan(path, |_, _| {})))
+        } else {
+            Ok(vec![format!("{}: {}", path.display(), self.add_file(path)?)])
+        }
     }
 
     /// Every copy including twins.

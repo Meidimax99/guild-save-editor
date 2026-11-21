@@ -29,7 +29,8 @@ guild-save-edit-gui [folder-or-save]
    newest file time.
 3. **Open** one: all copies of it are loaded. For each human player the
    table shows that player's file, or **missing — not yet available**.
-   - **Add save file(s)…** loads more copies. The tool checks that each
+   - **Add save file(s)…** loads more copies, and **Add folder…** searches
+     a folder and its sub-folders for them. The tool checks that each
      added file is a copy of this save and belongs to a player without one.
    - A byte-identical second copy of a player is edited along with it.
    - A *different* copy of the same player is reported and left alone.

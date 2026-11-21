@@ -81,7 +81,7 @@ enum Cmd {
         /// Character ids to hand to the AI.
         #[arg(long = "ai", required = true, num_args = 1..)]
         ai: Vec<u16>,
-        /// Additional single save files to include.
+        /// Additional save files, or folders to search, to include.
         #[arg(long = "add")]
         add: Vec<PathBuf>,
         #[arg(long)]
@@ -266,7 +266,9 @@ fn main() -> Result<()> {
             let Some(f) = r.found.into_iter().nth(save.saturating_sub(1)) else { bail!("no save point #{save}") };
             let mut sess = session::Session::new(f, Some(root.clone()));
             for p in &add {
-                println!("{}", sess.add_file(p)?);
+                for line in sess.add_path(p)? {
+                    println!("{line}");
+                }
             }
             print_session(&sess);
             for line in sess.apply(&ai, keep_notices, output.as_deref())? {

@@ -45,6 +45,8 @@ fn main() -> eframe::Result {
 
 struct Scan {
     root: PathBuf,
+    /// Adding to the open save instead of listing saves.
+    add: bool,
     done: Arc<AtomicUsize>,
     total: Arc<AtomicUsize>,
     rx: mpsc::Receiver<ScanResult>,
@@ -91,6 +93,10 @@ impl Default for App {
 
 impl App {
     fn start_scan(&mut self, root: PathBuf) {
+        self.spawn_scan(root, false);
+    }
+
+    fn spawn_scan(&mut self, root: PathBuf, add: bool) {
         let (tx, rx) = mpsc::channel();
         let done = Arc::new(AtomicUsize::new(0));
         let total = Arc::new(AtomicUsize::new(0));
@@ -103,15 +109,25 @@ impl App {
             let _ = tx.send(res);
         });
         self.log.push(format!("scanning {}", root.display()));
-        self.session = None;
-        self.found.clear();
-        self.scan = Some(Scan { root, done, total, rx });
+        if !add {
+            self.session = None;
+            self.found.clear();
+        }
+        self.scan = Some(Scan { root, add, done, total, rx });
     }
 
     fn poll_scan(&mut self) {
         let Some(scan) = &self.scan else { return };
         if let Ok(res) = scan.rx.try_recv() {
             let root = scan.root.clone();
+            if scan.add {
+                self.scan = None;
+                if let Some(sess) = self.session.as_mut() {
+                    let lines = sess.add_scanned(res);
+                    self.log.extend(lines);
+                }
+                return;
+            }
             self.log.extend(res.errors.iter().map(|e| format!("error: skipped {e}")));
             let copies: usize = res.found.iter().map(|f| f.copies.len()).sum();
             self.log.push(format!("found {} save(s) in {} file(s)", res.found.len(), copies));
@@ -190,7 +206,7 @@ impl App {
     }
 
     fn list_view(&mut self, ui: &mut egui::Ui) {
-        if let Some(scan) = &self.scan {
+        if let Some(scan) = self.scan.as_ref().filter(|s| !s.add) {
             let (d, t) = (scan.done.load(Ordering::Relaxed), scan.total.load(Ordering::Relaxed));
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -246,6 +262,7 @@ impl App {
 
     fn session_view(&mut self, ui: &mut egui::Ui) {
         let mut add_files = Vec::new();
+        let mut add_folder = None;
         let mut back = false;
         {
             let sess = self.session.as_ref().unwrap();
@@ -346,10 +363,25 @@ impl App {
 
             ui.separator();
             ui.horizontal(|ui| {
-                if ui.button("Add save file(s)…").on_hover_text("Load more players' copies of this save").clicked()
+                let idle = self.scan.is_none();
+                if ui.add_enabled(idle, egui::Button::new("Add save file(s)…")).on_hover_text("Load more players' copies of this save").clicked()
                     && let Some(files) = rfd::FileDialog::new().add_filter("Gilde savegame", &["SAV", "sav"]).pick_files()
                 {
                     add_files = files;
+                }
+                if ui
+                    .add_enabled(idle, egui::Button::new("Add folder…"))
+                    .on_hover_text("Search a folder (and its sub-folders) for more copies of this save")
+                    .clicked()
+                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                {
+                    add_folder = Some(dir);
+                }
+                if let Some(scan) = &self.scan {
+                    ui.spinner();
+                    let (d, t) = (scan.done.load(Ordering::Relaxed), scan.total.load(Ordering::Relaxed));
+                    ui.label(if t == 0 { "searching…".to_string() } else { format!("reading {} of {t}…", d + 1) });
+                    ui.ctx().request_repaint();
                 }
                 ui.checkbox(&mut self.keep_notices, "keep pending notices")
                     .on_hover_text("By default, open message boxes of the handed-over player that need a human decision are cancelled, like the game does when a player leaves.");
@@ -386,6 +418,9 @@ impl App {
                 Ok(msg) => self.log.push(format!("{}: {msg}", f.display())),
                 Err(e) => self.log.push(format!("error: {e:#}")),
             }
+        }
+        if let Some(dir) = add_folder {
+            self.spawn_scan(dir, true);
         }
         if back {
             self.back_to_list();
