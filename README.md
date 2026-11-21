@@ -89,8 +89,16 @@ A single file can tell you which character its owner plays (kind `6`) and
 the names of the others (kind `7`). It can't tell you which machine or
 person plays each kind-`7` character.
 
-Both files are needed: a network load reads the `.SRV` first, then the
-`.SAV` (`FUN_004ff4c0`).
+Every player needs their own copy to rejoin. The join list shows a saved
+game only if the client has `gamedata/network/NAME.SAV` with the host's
+checksum list (`FUN_00521130`). When loading, every machine reads its own
+local `.SAV` (`FUN_004ff4c0` → `sv_LoadWorld`). The host also streams its
+`.SRV` to the others (`ls_SendGame`, `FUN_0050ecc0`), but only the new-game
+path reads the received data (`FUN_0050ee10`); the saved-game path never
+does. Only a new game is sent over the network: the host transfers the city
+file.
+
+The tool edits both `.SAV` and `.SRV` so they stay consistent.
 
 ## What `to-ai` changes
 
