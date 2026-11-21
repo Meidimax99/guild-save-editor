@@ -1,7 +1,7 @@
 # Die Gilde Gold — savegames and network games
 
-What was reverse-engineered from `GildeGold_TL.exe` (The Guild Gold, German
-2.05) for this tool. Addresses are virtual addresses in that executable; names
+Savegame format and network-game behaviour of `GildeGold_TL.exe` (The Guild
+Gold, German 2.05). Addresses are virtual addresses in that executable; names
 like `sv_LoadWorld` come from the `gilde-rs` project's `re/names.tsv`, the
 rest are Ghidra's `FUN_xxxxxxxx`.
 
@@ -72,7 +72,7 @@ what gets checksummed (§6.2).
 
 ## 3. World sections
 
-Parsed by `src/world.rs` (copied from `gilde-rs`), in loader order. Sections:
+Parsed by `src/world.rs`, in loader order. Sections:
 globals, objects (2521 in the sample), buildings (84), dynasties (16 slots),
 characters (~295), markets and cities, offices (42). **verified**: all
 sample saves and shipped `.cty` files parse to their exact end.
@@ -113,8 +113,7 @@ character index** (`FUN_00508750`).
 
 The debug name table at `0x637d70` (`DUMMY_NPC`, `MEISTER_NPC`,
 `POLITICIAN_NPC`, -, -, `PLAYER`, `REMOTE_PLAYER`, `RELATIVE_PLAYER`,
-`USED_PLAYER`, `INVISIBLE_NPC`) does **not** match the behaviour above and
-looks like a leftover from an earlier design.
+`USED_PLAYER`, `INVISIBLE_NPC`) does not match this behaviour.
 
 Sample network save, saved on Amadeus Abdomen's machine: id 1 kind 6, ids 2–7
 kind 7, id 26 kind 5. The header records 7 human players. **verified**
@@ -129,12 +128,9 @@ needed here (`Scene::parse_prefix`). **verified**
 About 8.4 MB after the scene. These are the loaders that `sv_LoadWorld` calls
 in order (v = save version). Field names are in-memory offsets.
 
-Sections 1–5 are **verified**: the editor walks them on every save and finds
-plausible notices with German texts, and the checks after them pass. Sections
-6–17 are **from code**. A complete tail parser written from these notes
-stopped 15734 bytes short of the end of both sample saves, so at least one
-layout below is incomplete; the 4-byte header difference in §9 below accounts
-for only a small part of it.
+Sections 1–5 are **verified** on the sample saves. Sections 6–17 are **from
+code** and incomplete: parsing them as listed ends 15734 bytes before the
+end of the sample saves.
 
 1. **`FUN_004e0d00`**: u32 magic `0x1d`; 29 × u32; u32. If v > `0x10040`:
    u32 n1 (default 0x80) and u32 n2 (default 0x200). Then n1 × 41-byte
@@ -332,7 +328,7 @@ only in the bytes listed above. **Not yet verified in the game.**
 ## 8. Open questions
 
 - Byte-level comparison of a host copy and a client copy of the same save.
-- The exact layout of dynamic sections 6–17 (see the 15734-byte gap).
+- The exact layout of dynamic sections 6–17.
 - Header bytes `0x25..0x2d` and the unnamed owner fields.
 - Whether the game rejects a copy whose own checksum no longer matches its
   entry in the list. Editing `+0x2e` changes the checksummed bytes; no check

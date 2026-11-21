@@ -177,6 +177,4 @@ version:
   human on another machine. When saving, the network player count is the
   number of `6`/`7` characters (`FUN_005c55c0`). The game's debug name
   table at `0x637d70` (`PLAYER`, `REMOTE_PLAYER`, `RELATIVE_PLAYER`, …)
-  looks out of date and doesn't match this. `15` = dead (`gm_KillSpieler`).
-* The parsers in `src/world.rs`, `src/scene.rs` and `src/reader.rs` are
-  copied from the `gilde-rs` reimplementation so this tool stands alone.
+  does not match this. `15` = dead (`gm_KillSpieler`).
