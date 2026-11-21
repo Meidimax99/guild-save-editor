@@ -163,6 +163,11 @@ The character keeps its name, family, dynasty, buildings, and money.
 
 ## Format notes
 
+The full write-up of the reverse-engineering findings (file layout, header,
+character kinds, dynamic state, network save/join/load behaviour, open
+questions) is in [`docs/savegame-format.md`](docs/savegame-format.md). Short
+version:
+
 * `.SAV`/`.SRV`: gzip stream. Inside is the world-state format of the `.cty`
   city files (header flags `5` = save, `6` = snapshot), then the embedded
   `.ed3` city scene, then (in `.SAV` only) about 8 MB of dynamic simulation
