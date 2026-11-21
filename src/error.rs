@@ -6,6 +6,10 @@ pub enum Error {
     Eof { offset: usize, wanted: usize },
     #[error("{0}")]
     Invalid(String),
+    #[error("not found: {0}")]
+    NotFound(std::path::PathBuf),
+    #[error("zip: {0}")]
+    Zip(#[from] zip::result::ZipError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

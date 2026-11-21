@@ -25,8 +25,19 @@ cargo build --release
   field. A single record is shown as field / type / value.
 - Blue values open: nested records, lists, and long byte fields (as a hex
   dump). The breadcrumb at the top goes back up.
-- Hover an integer to see it as hex, signed, float and raw bytes; many
-  unnamed fields (`fXX` = in-memory offset) are floats or packed values.
+- Values are shown decoded where the meaning is known:
+  - codes as the game's own texts (gender, religion, rank, master grade,
+    job, character type);
+  - dates as year and time;
+  - family links, dynasties and building owners as names;
+  - coat of arms as a number, "none" markers as –;
+  - floats stored in integer fields as floats.
+
+  Hover a value to see the raw number. The game texts are read from the
+  game installation, found automatically near the save or the working
+  directory; without it, codes are shown as numbers.
+- Fields with a known meaning show a readable name; unknown ones keep their
+  raw name (`fXX` = in-memory offset), greyed out.
 - **Filter** keeps the rows that contain the text in any field.
 - By default only fields that make sense to edit are shown. Raw byte data,
   file offsets, and the technical sections (`file`, `scene`) are hidden.

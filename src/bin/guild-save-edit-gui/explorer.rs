@@ -2,7 +2,7 @@
 
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
-use guild_save_edit::explore::{self, Explored, Step};
+use guild_save_edit::explore::{self, Context, Explored, Step};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -145,10 +145,10 @@ impl Explorer {
                 .as_ref()
                 .is_none_or(|c| c.nav != self.nav || c.filter != self.filter || c.show_all != self.show_all);
             if stale {
-                self.cache = Some(build_cache(node, &self.nav, &self.filter, self.show_all));
+                self.cache = Some(build_cache(&data.ctx, node, &self.nav, &self.filter, self.show_all));
             }
             let cache = self.cache.as_ref().unwrap();
-            if let Some(next) = node_view(ui, node, &self.nav, cache) {
+            if let Some(next) = node_view(ui, &data.ctx, node, &self.nav, cache) {
                 go = Some(next);
             }
         });
@@ -183,15 +183,19 @@ fn matches(text: &str, filter: &str) -> bool {
     filter.is_empty() || text.to_lowercase().contains(filter)
 }
 
-fn build_cache(node: &Value, nav: &[Step], filter: &str, show_all: bool) -> Cache {
+fn build_cache(ctx: &Context, node: &Value, nav: &[Step], filter: &str, show_all: bool) -> Cache {
     let f = filter.to_lowercase();
+    let scope = explore::scope_of(nav);
+    let shown = |k: &str, v: &Value| explore::display(ctx, &scope, k, v).unwrap_or_else(|| explore::preview(v));
     let mut columns = Vec::new();
     let rows = match node {
         Value::Object(m) => m
             .iter()
             .enumerate()
             .filter(|(_, (k, v))| show_all || !explore::is_technical_field(k, v))
-            .filter(|(_, (k, v))| matches(k, &f) || matches(&explore::preview(v), &f))
+            .filter(|(_, (k, v))| {
+                matches(k, &f) || matches(explore::label(&scope, k).unwrap_or(""), &f) || matches(&shown(k, v), &f)
+            })
             .map(|(i, _)| i)
             .collect(),
         Value::Array(a) if a.first().is_some_and(Value::is_object) => {
@@ -214,16 +218,16 @@ fn build_cache(node: &Value, nav: &[Step], filter: &str, show_all: bool) -> Cach
                 .enumerate()
                 .filter(|(_, r)| match r {
                     Value::Object(m) => {
-                        f.is_empty() || columns.iter().any(|c| m.get(c).is_some_and(|v| matches(&explore::preview(v), &f)))
+                        f.is_empty() || columns.iter().any(|c| m.get(c).is_some_and(|v| matches(&shown(c, v), &f)))
                     }
-                    other => matches(&explore::preview(other), &f),
+                    other => matches(&shown("", other), &f),
                 })
                 .map(|(i, _)| i)
                 .collect()
         }
         Value::Array(a) => match explore::as_bytes(node) {
             Some(b) => (0..b.len().div_ceil(16)).collect(),
-            None => a.iter().enumerate().filter(|(_, v)| matches(&explore::preview(v), &f)).map(|(i, _)| i).collect(),
+            None => a.iter().enumerate().filter(|(_, v)| matches(&shown("", v), &f)).map(|(i, _)| i).collect(),
         },
         _ => vec![0],
     };
@@ -240,7 +244,16 @@ fn short(s: String) -> String {
 }
 
 /// One value cell. Returns true if it was clicked to drill in.
-fn value_cell(ui: &mut egui::Ui, v: &Value) -> bool {
+fn value_cell(ui: &mut egui::Ui, ctx: &Context, scope: &str, key: &str, v: &Value) -> bool {
+    if let Some(t) = explore::display(ctx, scope, key, v) {
+        let r = ui.add(egui::Label::new(short(t.clone())).truncate());
+        let mut tip = format!("{t}\n\nraw: {}", explore::preview(v));
+        if let Some(x) = explore::int_readings(v) {
+            tip += &format!("\n{x}");
+        }
+        r.on_hover_text(tip);
+        return false;
+    }
     let text = short(explore::preview(v));
     if explore::is_composite(v) || explore::as_bytes(v).is_some_and(|b| b.len() > 32) {
         let r = ui.add(egui::Label::new(egui::RichText::new(text).color(LINK)).sense(egui::Sense::click()).truncate());
@@ -278,7 +291,7 @@ fn child(nav: &[Step], s: Step) -> Vec<Step> {
     n
 }
 
-fn node_view(ui: &mut egui::Ui, node: &Value, nav: &[Step], cache: &Cache) -> Option<Vec<Step>> {
+fn node_view(ui: &mut egui::Ui, ctx: &Context, node: &Value, nav: &[Step], cache: &Cache) -> Option<Vec<Step>> {
     let mut go = None;
     egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| match node {
         Value::Object(m) => {
@@ -312,7 +325,7 @@ fn node_view(ui: &mut egui::Ui, node: &Value, nav: &[Step], cache: &Cache) -> Op
                             ui.colored_label(DIM, explore::type_name(v));
                         });
                         row.col(|ui| {
-                            if value_cell(ui, v) {
+                            if value_cell(ui, ctx, &scope, k, v) {
                                 go = Some(child(nav, Step::Key(k.clone())));
                             }
                         });
@@ -341,6 +354,7 @@ fn node_view(ui: &mut egui::Ui, node: &Value, nav: &[Step], cache: &Cache) -> Op
                     }
                 })
                 .body(|body| {
+                    let scope = explore::scope_of(nav);
                     body.rows(ROW_H, cache.rows.len(), |mut row| {
                         let i = cache.rows[row.index()];
                         let rec = &a[i];
@@ -352,7 +366,7 @@ fn node_view(ui: &mut egui::Ui, node: &Value, nav: &[Step], cache: &Cache) -> Op
                         for c in &cache.columns {
                             row.col(|ui| match rec.get(c) {
                                 Some(v) => {
-                                    if value_cell(ui, v) {
+                                    if value_cell(ui, ctx, &scope, c, v) {
                                         go = Some(child(&child(nav, Step::Index(i)), Step::Key(c.clone())));
                                     }
                                 }
@@ -430,7 +444,7 @@ fn node_view(ui: &mut egui::Ui, node: &Value, nav: &[Step], cache: &Cache) -> Op
                             ui.colored_label(DIM, explore::type_name(&a[i]));
                         });
                         row.col(|ui| {
-                            if value_cell(ui, &a[i]) {
+                            if value_cell(ui, ctx, &explore::scope_of(nav), "", &a[i]) {
                                 go = Some(child(nav, Step::Index(i)));
                             }
                         });

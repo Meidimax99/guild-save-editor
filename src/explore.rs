@@ -8,7 +8,7 @@
 use crate::save::SaveFile;
 use crate::scene::Scene;
 use crate::world::WorldFile;
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 use serde_json::{Map, Value, json};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -16,6 +16,94 @@ use std::path::{Path, PathBuf};
 pub struct Explored {
     pub path: PathBuf,
     pub root: Value,
+    /// Lookups used to show values as text.
+    pub ctx: Context,
+}
+
+/// What is needed to turn raw values into readable text: the game's text
+/// table (loaded from the game installation if found) and name lookups built
+/// from the save itself.
+#[derive(Default)]
+pub struct Context {
+    pub texts: Option<std::sync::Arc<crate::text::TextDb>>,
+    pub game_dir: Option<PathBuf>,
+    /// Character object id (`+0x04`) → name.
+    pub char_by_object: std::collections::HashMap<u32, String>,
+    /// Character slot → name.
+    pub char_by_slot: std::collections::HashMap<u16, String>,
+    /// Dynasty id → name.
+    pub dynasty: std::collections::HashMap<u16, String>,
+    /// Building object id → name.
+    pub building_by_object: std::collections::HashMap<u32, String>,
+}
+
+/// Game texts are loaded once per game folder.
+static TEXTS: std::sync::Mutex<Option<(PathBuf, std::sync::Arc<crate::text::TextDb>)>> = std::sync::Mutex::new(None);
+
+fn load_texts(near: &Path) -> Option<(PathBuf, std::sync::Arc<crate::text::TextDb>)> {
+    let dir = crate::vfs::find_game_dir_from(near.parent().unwrap_or(near)).or_else(crate::vfs::find_game_dir)?;
+    let mut cache = TEXTS.lock().ok()?;
+    if let Some((d, t)) = cache.as_ref()
+        && *d == dir
+    {
+        return Some((d.clone(), t.clone()));
+    }
+    let vfs = crate::vfs::Vfs::open_game_dir(&dir).ok()?;
+    let lang = vfs
+        .list()
+        .iter()
+        .find_map(|p| p.strip_prefix("textbin_").and_then(|r| r.split('/').next()).map(str::to_owned))
+        .unwrap_or_else(|| "german".into());
+    let db = std::sync::Arc::new(crate::text::TextDb::load(&vfs, &lang).ok()?);
+    *cache = Some((dir.clone(), db.clone()));
+    Some((dir, db))
+}
+
+impl Context {
+    fn build(world: &WorldFile, near: &Path) -> Self {
+        let mut c = Context::default();
+        if let Some((dir, db)) = load_texts(near) {
+            c.game_dir = Some(dir);
+            c.texts = Some(db);
+        }
+        for ch in &world.characters.list {
+            let name = crate::ops::full_name(ch);
+            c.char_by_object.insert(ch.f04, name.clone());
+            c.char_by_slot.insert(ch.id, name);
+        }
+        for d in &world.dynasties {
+            let n = crate::reader::fixed_cstr(&d.f02);
+            if d.id != 0xffff {
+                c.dynasty.insert(d.id, if n.is_empty() { format!("dynasty {:#x}", d.id) } else { n });
+            }
+        }
+        for b in &world.buildings {
+            c.building_by_object.insert(b.f01, b.name.clone());
+        }
+        c
+    }
+
+    fn text(&self, id: u32) -> Option<String> {
+        self.texts.as_ref()?.get(id).filter(|s| !s.is_empty()).map(str::to_owned)
+    }
+
+    /// `base + v` from the game's text table, with the number in brackets.
+    fn enum_text(&self, base: u32, v: u64) -> String {
+        match self.text(base + v as u32) {
+            Some(t) => format!("{t} ({v})"),
+            None => v.to_string(),
+        }
+    }
+
+    fn character_object(&self, id: u64) -> String {
+        if id == 0xffff_ffff {
+            return "–".into();
+        }
+        match self.char_by_object.get(&(id as u32)) {
+            Some(n) => n.clone(),
+            None => format!("#{id}"),
+        }
+    }
 }
 
 /// Load any world-state file: `.SAV`, `.SRV` (gzip) or `.cty` (plain).
@@ -30,6 +118,7 @@ pub fn load(path: &Path) -> Result<Explored> {
         data.clone()
     };
     let world = WorldFile::parse(&raw).with_context(|| format!("parsing {}", path.display()))?;
+    let ctx = Context::build(&world, path);
 
     let mut root = Map::new();
     let file_type = if !world.header.is_city() {
@@ -79,7 +168,7 @@ pub fn load(path: &Path) -> Result<Explored> {
             }
         }
     }
-    Ok(Explored { path: path.to_owned(), root: Value::Object(root) })
+    Ok(Explored { path: path.to_owned(), root: Value::Object(root), ctx })
 }
 
 /// One step of a path into the tree.
@@ -279,7 +368,7 @@ pub fn label(scope: &str, key: &str) -> Option<&'static str> {
         ("header", "f32") => "game date",
         ("header", "f40") => "owner first name",
         ("header", "f50") => "owner last name",
-        ("header", "f60") => "owner profession, ?, ?",
+        ("header", "f60") => "owner master grade, ?, rank",
         ("header", "f63") => "owner religion",
         ("header", "f64") => "owner coat of arms (+0x59a)",
         ("header", "f6c") => "owner gender, ?",
@@ -302,6 +391,7 @@ pub fn label(scope: &str, key: &str) -> Option<&'static str> {
         ("characters/list", "f09") => "gender (0 m, 1 f)",
         ("characters/list", "f0a") => "age",
         ("characters/list", "f0c") => "religion",
+        ("characters/list", "f0d") => "rank (Stand)",
         ("characters/list", "f30") => "first name",
         ("characters/list", "f40") => "last name",
         ("characters/list", "f50") => "family / dynasty id",
@@ -309,7 +399,7 @@ pub fn label(scope: &str, key: &str) -> Option<&'static str> {
         ("characters/list", "f58") => "generation",
         ("characters/list", "f5c") => "family: spouse, ?, children (object ids)",
         ("characters/list", "f80") => "appearance",
-        ("characters/list", "f164") => "profession, ?, ?",
+        ("characters/list", "f164") => "master grade, job, …",
         // Dynasties.
         ("dynasties", "id") => "dynasty id",
         ("dynasties", "f02") => "name",
@@ -317,6 +407,138 @@ pub fn label(scope: &str, key: &str) -> Option<&'static str> {
         ("objects", "f02") => "object id",
         ("buildings", "proto") => "prototype (A_Geb.dat)",
         ("buildings", "f01") => "object id",
+        ("buildings", "name") => "name",
+        ("buildings", "f27") => "owner",
         _ => return None,
     })
+}
+
+
+/// Game texts used to decode character fields (ids in the global text table
+/// `0x144a280`, found through the character dump `FUN_004d3ab0`).
+mod text_id {
+    pub const RELIGION: u32 = 1158; // katholisch, katharisch
+    pub const GENDER: u32 = 1161; // männlich, weiblich
+    pub const RANK: u32 = 276; // Unfreier, Herr, Bürger, Patrizier, …
+    pub const MASTER_GRADE: u32 = 304; // Kein Meistergrad, Meisterdieb, …
+    pub const JOB: u32 = 525; // (kein Personal), Diebesgeselle, …
+}
+
+fn u32s(v: &Value) -> Option<Vec<u32>> {
+    let b = as_bytes(v)?;
+    (b.len() % 4 == 0).then(|| b.chunks(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect())
+}
+
+/// A 14-byte game date (round i32, hour u16, minute i32, second i32).
+pub fn date_text(b: &[u8]) -> Option<String> {
+    if b.len() != 14 {
+        return None;
+    }
+    let round = i32::from_le_bytes(b[0..4].try_into().unwrap());
+    let hour = u16::from_le_bytes(b[4..6].try_into().unwrap());
+    let minute = i32::from_le_bytes(b[6..10].try_into().unwrap());
+    if !(0..1000).contains(&round) || hour > 23 || !(0..60).contains(&minute) {
+        return None;
+    }
+    Some(format!("{} {hour:02}:{minute:02} (round {round})", 1400 + round))
+}
+
+/// A readable rendering of a value, if one is known; `None` = show the raw
+/// value. `scope` is [`scope_of`] the record, `key` the field.
+pub fn display(ctx: &Context, scope: &str, key: &str, v: &Value) -> Option<String> {
+    use text_id::*;
+    let n = v.as_u64();
+    let field = |s: &str, k: &str| scope == s && key == k;
+    // Specific fields first.
+    let specific = match (scope, key) {
+        ("characters/list", "f02") => n.map(|k| format!("{} ({k})", crate::ops::kind_name(k as u8))),
+        ("characters/list", "f09") | ("header", "f6c") => {
+            let g = n.or_else(|| v.as_array().and_then(|a| a.first()).and_then(Value::as_u64))?;
+            Some(ctx.enum_text(GENDER, g))
+        }
+        ("characters/list", "f0c") | ("header", "f63") => n.map(|r| ctx.enum_text(RELIGION, r)),
+        ("characters/list", "f0d") => n.map(|r| ctx.enum_text(RANK, r)),
+        ("characters/list", "f164") => {
+            let b = as_bytes(v)?;
+            Some(format!(
+                "grade: {}, job: {}, {}",
+                ctx.enum_text(MASTER_GRADE, b[0] as u64),
+                ctx.enum_text(JOB, b[1] as u64),
+                hex(&b[2..])
+            ))
+        }
+        ("header", "f60") => {
+            let a = v.as_array()?;
+            let g = a.first()?.as_u64()?;
+            let r = a.get(2)?.as_u64()?;
+            Some(format!("grade: {}, rank: {}, ? {}", ctx.enum_text(MASTER_GRADE, g), ctx.enum_text(RANK, r), preview(&a[1])))
+        }
+        ("characters/list", "f50") => n.map(|d| match ctx.dynasty.get(&(d as u16)) {
+            Some(name) => format!("{name} ({d:#x})"),
+            None => format!("{d:#x}"),
+        }),
+        ("characters/list", "f54") | ("header", "f64") => n.map(|a| format!("{}", a as i64 - 0x59a)),
+        ("characters/list", "f5c") => {
+            let ids = u32s(v)?;
+            let spouse = ctx.character_object(ids[0] as u64);
+            let kids: Vec<String> =
+                ids[2..].iter().filter(|&&x| x != 0xffff_ffff && x != 0xffff).map(|&x| ctx.character_object(x as u64)).collect();
+            Some(format!(
+                "spouse: {spouse}; children: {}{}",
+                if kids.is_empty() { "–".to_string() } else { kids.join(", ") },
+                if ids[1] != 0xffff_ffff && ids[1] != 0xffff { format!("; ? {}", ctx.character_object(ids[1] as u64)) } else { String::new() }
+            ))
+        }
+        ("characters", "g71da90") | ("notices", "character") => {
+            n.map(|s| ctx.char_by_slot.get(&(s as u16)).map(|x| format!("{x} ({s})")).unwrap_or_else(|| s.to_string()))
+        }
+        ("buildings", "f27") => n.map(|s| {
+            if s == 0xffff {
+                "–".into()
+            } else {
+                ctx.char_by_slot.get(&(s as u16)).map(|x| format!("{x} ({s})")).unwrap_or_else(|| s.to_string())
+            }
+        }),
+        ("header", "f70") => {
+            let a = v.as_array()?;
+            let ids: Vec<String> = a
+                .iter()
+                .filter_map(Value::as_i64)
+                .map(|x| {
+                    if x == -1 {
+                        "–".into()
+                    } else {
+                        ctx.building_by_object.get(&(x as u32)).cloned().unwrap_or_else(|| ctx.character_object(x as u64))
+                    }
+                })
+                .collect();
+            Some(ids.join(", "))
+        }
+        _ => None,
+    };
+    if specific.is_some() {
+        return specific;
+    }
+    let _ = field;
+    // Generic rules.
+    match v {
+        Value::Number(_) => {
+            let i = v.as_i64()?;
+            if i == -1 || i == 0xffff_ffff {
+                return Some("–".into());
+            }
+            // Floats stored in 32-bit fields: large integers whose float
+            // reading is an ordinary number.
+            if (0x3000_0000..=0xffff_ffff).contains(&i) || (i < 0 && i >= i32::MIN as i64) {
+                let f = f32::from_bits(i as u32);
+                if f.is_finite() && (1e-3..1e7).contains(&f.abs()) {
+                    let t = format!("{f:.3}");
+                    return Some(t.trim_end_matches('0').trim_end_matches('.').to_owned());
+                }
+            }
+            None
+        }
+        Value::Array(_) => as_bytes(v).and_then(|b| date_text(&b)),
+        _ => None,
+    }
 }
