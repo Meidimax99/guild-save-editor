@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use guild_save_edit::ops::{self, dynasty_name, full_name, is_player, kind_name};
 use guild_save_edit::save::{SaveFile, companions};
+use guild_save_edit::session;
 use std::path::{Path, PathBuf};
 
 
@@ -66,6 +67,28 @@ enum Cmd {
         id: u16,
         #[command(flatten)]
         out: Output,
+    },
+    /// Scan a folder tree for network saves and group every player's copy
+    /// of the same save point.
+    Scan { root: PathBuf },
+    /// Hand players to the AI in every player's copy of one save point.
+    Apply {
+        /// Folder tree containing the players' saves.
+        root: PathBuf,
+        /// Which save point (number from `scan`, 1 = newest).
+        #[arg(long, default_value_t = 1)]
+        save: usize,
+        /// Character ids to hand to the AI.
+        #[arg(long = "ai", required = true, num_args = 1..)]
+        ai: Vec<u16>,
+        /// Additional single save files to include.
+        #[arg(long = "add")]
+        add: Vec<PathBuf>,
+        #[arg(long)]
+        keep_notices: bool,
+        /// Write into this folder, mirroring the tree (default: in place with .bak).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
     /// Set a character's raw kind byte (expert use).
     SetKind {
@@ -179,6 +202,39 @@ fn edit(path: &Path, out: &Output, mut f: impl FnMut(&mut SaveFile) -> Result<Ve
     Ok(())
 }
 
+fn print_session(sess: &session::Session) {
+    println!("save      {} — {} — {}", sess.name(), sess.key.city, session::date_text(sess.reference()));
+    for seat in sess.seats() {
+        let file = match seat.copy {
+            Some(i) => sess.copies[i].sav.path.display().to_string(),
+            None => "MISSING".into(),
+        };
+        println!("  {:>4}  {:<26} {:<16} {:<26} {}", seat.id, seat.name, seat.dynasty, session::seat_role(seat.kind), file);
+    }
+    for c in &sess.copies {
+        for n in &c.notes {
+            println!("  note: {}: {n}", c.sav.path.display());
+        }
+    }
+    for c in &sess.copies {
+        for t in &c.twins {
+            println!("  identical copy (edited too): {}", t.sav.path.display());
+        }
+    }
+    for (p, why) in &sess.conflicts {
+        println!("  NOT USED: {why}");
+        let _ = p;
+    }
+}
+
+fn scan(root: &Path) -> Result<session::ScanResult> {
+    let r = session::scan(root, |_, _| {});
+    for e in &r.errors {
+        eprintln!("skipped {e}");
+    }
+    Ok(r)
+}
+
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Info { save } => cmd_info(&save),
@@ -196,6 +252,28 @@ fn main() -> Result<()> {
         Cmd::Notices { save, character } => cmd_notices(&save, character),
         Cmd::ToAi { save, id, keep_notices, out } => edit(&save, &out, |s| ops::to_ai(s, id, keep_notices)),
         Cmd::ToHuman { save, id, out } => edit(&save, &out, |s| ops::to_human(s, id)),
+        Cmd::Scan { root } => {
+            let r = scan(&root)?;
+            for (i, f) in r.found.into_iter().enumerate() {
+                println!("[{}] newest file {}, {} cop{}", i + 1, session::time_text(f.newest()), f.copies.len(), if f.copies.len() == 1 { "y" } else { "ies" });
+                print_session(&session::Session::new(f, Some(root.clone())));
+                println!();
+            }
+            Ok(())
+        }
+        Cmd::Apply { root, save, ai, add, keep_notices, output } => {
+            let r = scan(&root)?;
+            let Some(f) = r.found.into_iter().nth(save.saturating_sub(1)) else { bail!("no save point #{save}") };
+            let mut sess = session::Session::new(f, Some(root.clone()));
+            for p in &add {
+                println!("{}", sess.add_file(p)?);
+            }
+            print_session(&sess);
+            for line in sess.apply(&ai, keep_notices, output.as_deref())? {
+                println!("{line}");
+            }
+            Ok(())
+        }
         Cmd::SetKind { save, id, kind, out } => edit(&save, &out, |s| ops::set_kind(s, id, kind, None)),
     }
 }

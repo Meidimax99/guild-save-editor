@@ -15,14 +15,45 @@ cargo build --release
 # GUI:          target/release/guild-save-edit-gui [save.SAV]
 ```
 
-## GUI
+## GUI: editing every player's copy at once
 
-`guild-save-edit-gui` opens a save pair (Browse…, or type a path and press
-Enter), shows the save's date and its players, and offers **Hand to AI** for
-human players and **Make human** for AI players. Changes stay in memory until
-you click **Save** (overwrites; originals kept as `.bak`) or **Save as…** (a
-new `.SAV` with its `.SRV` next to it). Every action and any error shows in
-the log at the bottom. It applies the same edits as the command line.
+```sh
+guild-save-edit-gui [folder-or-save]
+```
+
+1. **Scan** a folder holding the saves you collected from the players.
+   Sub-folders are searched, e.g. one per player.
+2. The tool groups all `.SAV` files by save point. Copies of the same save
+   from different players count as one save. If several saves are found,
+   it lists them with name, city, in-game date, the players found, and the
+   newest file time.
+3. **Open** one: all copies of it are loaded. For each human player the
+   table shows that player's file, or **missing — not yet available**.
+   - **Add save file(s)…** loads more copies. The tool checks that each
+     added file is a copy of this save and belongs to a player without one.
+   - A byte-identical second copy of a player is edited along with it.
+   - A *different* copy of the same player is reported and left alone.
+   - Not every player's copy has to be present.
+4. Tick **Hand to AI** for the players who left, then **Apply**. Every
+   loaded copy (`.SAV` and `.SRV`) is edited the same way. The output goes
+   either in place (originals kept as `.bak`) or into a new folder with the
+   same structure as the scanned one. Files added from outside the scanned
+   folder go to `added/<player>/`.
+
+How a copy is identified:
+- **Owner:** the character of kind `6` in it, cross-checked against the
+  owner's name in the header.
+- **Save point:** the header checksum list (`+0x78`) plus version, city,
+  and in-game date. The lobby uses the same checksum list to match the
+  players' copies, so it is identical in all copies of one save.
+
+The command line has the same workflow:
+
+```sh
+guild-save-edit scan  collected/                          # list saves and copies
+guild-save-edit apply collected/ --save 1 --ai 4 5 -o collected-edited/
+guild-save-edit apply collected/ --save 1 --ai 4 --add extra/ANA.SAV   # in place
+```
 
 ## Usage
 

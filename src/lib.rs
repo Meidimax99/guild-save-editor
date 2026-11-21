@@ -6,4 +6,5 @@ pub mod ops;
 pub mod reader;
 pub mod save;
 pub mod scene;
+pub mod session;
 pub mod world;

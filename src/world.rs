@@ -359,7 +359,7 @@ fn arr<const N: usize>(r: &mut Reader) -> Result<[u8; N]> {
     Ok(r.bytes(N)?.try_into().unwrap())
 }
 
-fn read_header(r: &mut Reader) -> Result<Header> {
+pub fn read_header(r: &mut Reader) -> Result<Header> {
     let mut h = Header { version: r.u32()?, ..Default::default() };
     let v = h.version;
     if !(0x10026..0x1005b).contains(&v) {
