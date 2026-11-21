@@ -11,8 +11,18 @@ the reverse and hand an AI dynasty to a human.
 
 ```sh
 cargo build --release
-# binary: target/release/guild-save-edit
+# command line: target/release/guild-save-edit
+# GUI:          target/release/guild-save-edit-gui [save.SAV]
 ```
+
+## GUI
+
+`guild-save-edit-gui` opens a save pair (Browse…, or type a path and press
+Enter), shows the save's date and its players, and offers **Hand to AI** for
+human players and **Make human** for AI players. Changes stay in memory until
+you click **Save** (overwrites; originals kept as `.bak`) or **Save as…** (a
+new `.SAV` with its `.SRV` next to it). Every action and any error shows in
+the log at the bottom. It applies the same edits as the command line.
 
 ## Usage
 

@@ -1,23 +1,12 @@
-#![allow(dead_code)]
 //! `guild-save-edit`: inspect and edit savegames of *Die Gilde Gold*
 //! (The Guild Gold, v2.05, save version 0x1005a).
 
-mod error;
-mod reader;
-mod save;
-mod scene;
-mod world;
-
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use save::{AI_CANCELLED_NOTICES, SaveFile, companions};
+use guild_save_edit::ops::{self, dynasty_name, full_name, is_player, kind_name};
+use guild_save_edit::save::{SaveFile, companions};
 use std::path::{Path, PathBuf};
-use world::Character;
 
-/// Character kinds (`+0x02`) relevant for players.
-const KIND_AI_CONVERTED: u8 = 5;
-const KIND_HUMAN: u8 = 6;
-const KIND_AI: u8 = 7;
 
 #[derive(Parser)]
 #[command(version, about = "Inspect and edit Die Gilde Gold savegames (.SAV/.SRV)")]
@@ -86,41 +75,6 @@ enum Cmd {
         #[command(flatten)]
         out: Output,
     },
-}
-
-fn kind_name(k: u8) -> &'static str {
-    match k {
-        0 => "npc",
-        1 => "master npc",
-        2 => "politician npc",
-        KIND_AI_CONVERTED => "AI player (taken over)",
-        KIND_HUMAN => "human player",
-        KIND_AI => "AI player",
-        8 => "used player",
-        9 => "invisible npc",
-        15 => "dead",
-        _ => "?",
-    }
-}
-
-fn is_player(c: &Character) -> bool {
-    matches!(c.f02, KIND_AI_CONVERTED | KIND_HUMAN | KIND_AI)
-}
-
-fn full_name(c: &Character) -> String {
-    let first = reader::fixed_cstr(&c.f30);
-    let last = reader::fixed_cstr(&c.f40);
-    format!("{first} {last}").trim().to_owned()
-}
-
-fn dynasty_name(s: &SaveFile, c: &Character) -> String {
-    s.world
-        .dynasties
-        .iter()
-        .find(|d| d.id == c.f50)
-        .map(|d| reader::fixed_cstr(&d.f02))
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| format!("#{:#x}", c.f50))
 }
 
 fn print_header(s: &SaveFile) {
@@ -202,73 +156,23 @@ fn targets(path: &Path, out: &Output) -> Result<Vec<(PathBuf, PathBuf)>> {
         .collect())
 }
 
-fn edit(path: &Path, out: &Output, mut f: impl FnMut(&mut SaveFile) -> Result<()>) -> Result<()> {
+fn edit(path: &Path, out: &Output, mut f: impl FnMut(&mut SaveFile) -> Result<Vec<String>>) -> Result<()> {
     let plan = targets(path, out)?;
     let mut done = Vec::new();
     for (src, dst) in &plan {
         let mut s = SaveFile::load(src)?;
-        f(&mut s).with_context(|| format!("editing {}", src.display()))?;
-        s.reparse()?;
+        for line in f(&mut s).with_context(|| format!("editing {}", src.display()))? {
+            println!("{line}");
+        }
         done.push((s, dst.clone()));
     }
     // Write only after every file was edited successfully.
     for (s, dst) in &done {
-        if out.in_place {
-            let bak = PathBuf::from(format!("{}.bak", s.path.display()));
-            if !bak.exists() {
-                std::fs::copy(&s.path, &bak).with_context(|| format!("backing up to {}", bak.display()))?;
-                println!("backup    {}", bak.display());
-            }
+        for line in ops::write_with_backup(s, dst)? {
+            println!("{line}");
         }
-        s.write(dst)?;
-        println!("wrote     {}", dst.display());
     }
     Ok(())
-}
-
-fn cmd_to_ai(path: &Path, id: u16, keep_notices: bool, out: &Output) -> Result<()> {
-    edit(path, out, |s| {
-        let c = s.character(id)?;
-        if c.f02 != KIND_HUMAN {
-            bail!("character {id} ({}) is {}, not a human player", full_name(c), kind_name(c.f02));
-        }
-        let humans = s.world.characters.list.iter().filter(|c| c.f02 == KIND_HUMAN).count();
-        if humans == 1 {
-            eprintln!("warning: {} is the only human player; the game may treat this as game over", full_name(c));
-        }
-        println!("{}: {} ({}) -> AI", s.path.display(), full_name(c), dynasty_name(s, c));
-        s.set_kind(id, KIND_AI_CONVERTED)?;
-        s.clear_slots(id)?;
-        if !s.is_snapshot() && !keep_notices {
-            let sec = s.notices()?;
-            let drop: Vec<usize> = sec
-                .notices
-                .iter()
-                .enumerate()
-                .filter(|(_, n)| n.character == id && AI_CANCELLED_NOTICES.contains(&n.kind))
-                .map(|(i, _)| i)
-                .collect();
-            if !drop.is_empty() {
-                println!("  cancelling {} pending notice(s) that need a human answer", drop.len());
-                s.drop_notices(&sec, &drop)?;
-            }
-        }
-        Ok(())
-    })
-}
-
-fn cmd_set_kind(path: &Path, id: u16, kind: u8, expect: Option<&[u8]>, out: &Output) -> Result<()> {
-    edit(path, out, |s| {
-        let c = s.character(id)?;
-        if let Some(ok) = expect
-            && !ok.contains(&c.f02)
-        {
-            bail!("character {id} ({}) is {}, not an AI player", full_name(c), kind_name(c.f02));
-        }
-        println!("{}: {} kind {} -> {kind} ({})", s.path.display(), full_name(c), c.f02, kind_name(kind));
-        s.set_kind(id, kind)?;
-        Ok(())
-    })
 }
 
 fn main() -> Result<()> {
@@ -286,10 +190,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Notices { save, character } => cmd_notices(&save, character),
-        Cmd::ToAi { save, id, keep_notices, out } => cmd_to_ai(&save, id, keep_notices, &out),
-        Cmd::ToHuman { save, id, out } => {
-            cmd_set_kind(&save, id, KIND_HUMAN, Some(&[KIND_AI, KIND_AI_CONVERTED]), &out)
-        }
-        Cmd::SetKind { save, id, kind, out } => cmd_set_kind(&save, id, kind, None, &out),
+        Cmd::ToAi { save, id, keep_notices, out } => edit(&save, &out, |s| ops::to_ai(s, id, keep_notices)),
+        Cmd::ToHuman { save, id, out } => edit(&save, &out, |s| ops::to_human(s, id)),
+        Cmd::SetKind { save, id, kind, out } => edit(&save, &out, |s| ops::set_kind(s, id, kind, None)),
     }
 }
