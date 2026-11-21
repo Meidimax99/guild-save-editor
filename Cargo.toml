@@ -1,0 +1,12 @@
+[package]
+name = "guild-save-edit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.9", features = ["derive"] }
+encoding_rs = "0.8.44"
+flate2 = "1.1.11"
+glam = "0.34.3"
+thiserror = "2.0.21"

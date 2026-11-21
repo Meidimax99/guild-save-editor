@@ -1,0 +1,12 @@
+/target/
+**/*.rs.bk
+*.swp
+*~
+.DS_Store
+# Never commit savegames (game data)
+*.SAV
+*.SRV
+*.sav
+*.srv
+*.bak
+*.tmp-edit
