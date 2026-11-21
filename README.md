@@ -15,6 +15,20 @@ cargo build --release
 # GUI:          target/release/guild-save-edit-gui [save.SAV]
 ```
 
+## GUI: Explorer tab
+
+**Explorer** shows every parsed field of one `.SAV`, `.SRV` or `.cty` file:
+- Sections are listed on the left: file info and offsets, header, globals,
+  objects, buildings, dynasties, characters, markets, cities, offices,
+  embedded scene, and pending notices.
+- A list of records is a table with one row per record and one column per
+  field. A single record is shown as field / type / value.
+- Blue values open: nested records, lists, and long byte fields (as a hex
+  dump). The breadcrumb at the top goes back up.
+- Hover an integer to see it as hex, signed, float and raw bytes; many
+  unnamed fields (`fXX` = in-memory offset) are floats or packed values.
+- **Filter** keeps the rows that contain the text in any field.
+
 ## GUI: editing every player's copy at once
 
 ```sh

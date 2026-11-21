@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub mod error;
+pub mod explore;
 pub mod ops;
 pub mod reader;
 pub mod save;

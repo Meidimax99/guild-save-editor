@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 use crate::reader::{Reader, fixed_cstr};
 use crate::scene::Scene;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Header {
     pub version: u32,
     /// Bit 1 (`& 2`): city file (no dynamic state follows).
@@ -44,7 +44,7 @@ impl Header {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Globals {
     pub g6438e4: u32,
     pub g71daf0: u32,
@@ -62,7 +62,7 @@ pub struct Globals {
 }
 
 /// Object instance (`f3_gm_lpObjekteINST`, 0x43 bytes in memory).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct ObjectInstance {
     pub f00: u16,
     pub f02: u32,
@@ -74,9 +74,9 @@ pub struct ObjectInstance {
     pub f1c: [u8; 31],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum BuildingExtra {
-    Raw([u8; 0x30]),
+    Raw(#[serde(serialize_with = "crate::reader::ser_bytes")] [u8; 0x30]),
     /// Type 0x1e: 64 plant cells (`f3g_PlantMap`).
     Plants(Vec<PlantCell>),
     /// Types 'H'/'I'/'J': graveyard (`gv_AllocGraveyardField`).
@@ -85,7 +85,7 @@ pub enum BuildingExtra {
     Ahm(AhmInfo),
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PlantCell {
     pub f00: u32,
     pub f04: u32,
@@ -97,7 +97,7 @@ pub struct PlantCell {
     pub f0d: u8,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Graveyard {
     pub f00: u32,
     pub kind: u32,
@@ -106,7 +106,7 @@ pub struct Graveyard {
     pub graves: Vec<Grave>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Zombie {
     pub f00: u32,
     pub f04: [u8; 16],
@@ -115,7 +115,7 @@ pub struct Zombie {
     pub f2c: [u32; 6],
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Grave {
     pub f00: u32,
     pub f04: u32,
@@ -125,7 +125,7 @@ pub struct Grave {
     pub zombie: u32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct AhmInfo {
     pub f00: u32,
     pub f04: u32,
@@ -134,7 +134,7 @@ pub struct AhmInfo {
 }
 
 /// Building instance (`f3_gm_lpGebaeudeINST`, 0xa9 bytes in memory).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BuildingInstance {
     /// Prototype index into `A_Geb.dat`.
     pub proto: u8,
@@ -159,7 +159,7 @@ pub struct BuildingInstance {
     pub f99: [u8; 16],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BuildingLabel {
     pub name: String,
     pub a: [u8; 16],
@@ -167,7 +167,7 @@ pub struct BuildingLabel {
 }
 
 /// 16 records of 0xac bytes at `0x802140`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Dynasty {
     pub id: u16,
     pub f02: [u8; 16],
@@ -195,7 +195,7 @@ pub struct Dynasty {
 }
 
 /// Character record (0x21c bytes in memory at `0x79cd40`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Character {
     /// File offset of this record (decompressed save).
     pub offset: usize,
@@ -265,7 +265,7 @@ pub struct Character {
     pub f214: [u8; 5],
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Characters {
     pub g71da90: u16,
     pub g71d0cc: u32,
@@ -274,7 +274,7 @@ pub struct Characters {
     pub list: Vec<Character>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct MarketEntry {
     pub f00: u16,
     pub f04: u32,
@@ -290,14 +290,14 @@ pub struct MarketEntry {
 }
 
 /// Five records at `0x802c20` (stride 0x2a90), one entry per ware.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Market {
     pub head: [u32; 4],
     pub wares: Vec<MarketEntry>,
 }
 
 /// Four records at `0x810100` (stride 0x2f4): the city and its neighbours.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct CityInfo {
     pub name: String,
     pub f20: [u8; 8],
@@ -326,7 +326,7 @@ pub struct CityInfo {
     pub f2cc: [u8; 8],
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Office {
     pub a: u8,
     pub b: u32,
@@ -336,7 +336,7 @@ pub struct Office {
     pub f: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WorldFile {
     pub header: Header,
     pub globals: Globals,

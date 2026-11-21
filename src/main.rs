@@ -68,6 +68,9 @@ enum Cmd {
         #[command(flatten)]
         out: Output,
     },
+    /// Explore the parsed fields of a .SAV/.SRV/.cty (same data as the GUI
+    /// explorer). PATH is slash-separated, e.g. `characters/3` or `header`.
+    Fields { file: PathBuf, path: Option<String> },
     /// Scan a folder tree for network saves and group every player's copy
     /// of the same save point.
     Scan { root: PathBuf },
@@ -252,6 +255,31 @@ fn main() -> Result<()> {
         Cmd::Notices { save, character } => cmd_notices(&save, character),
         Cmd::ToAi { save, id, keep_notices, out } => edit(&save, &out, |s| ops::to_ai(s, id, keep_notices)),
         Cmd::ToHuman { save, id, out } => edit(&save, &out, |s| ops::to_human(s, id)),
+        Cmd::Fields { file, path } => {
+            use guild_save_edit::explore::{self, Step};
+            let d = explore::load(&file)?;
+            let steps: Vec<Step> = path
+                .unwrap_or_default()
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.parse().map(Step::Index).unwrap_or_else(|_| Step::Key(s.to_owned())))
+                .collect();
+            let node = explore::get(&d.root, &steps).context("path not found")?;
+            match node {
+                serde_json::Value::Object(m) => {
+                    for (k, v) in m {
+                        println!("{k:<24} {:<22} {}", explore::type_name(v), explore::preview(v));
+                    }
+                }
+                serde_json::Value::Array(a) if explore::as_bytes(node).is_none() => {
+                    for (i, v) in a.iter().enumerate() {
+                        println!("{i:<6} {:<22} {}", explore::type_name(v), explore::preview(v));
+                    }
+                }
+                other => println!("{} {}", explore::type_name(other), explore::preview(other)),
+            }
+            Ok(())
+        }
         Cmd::Scan { root } => {
             let r = scan(&root)?;
             for (i, f) in r.found.into_iter().enumerate() {

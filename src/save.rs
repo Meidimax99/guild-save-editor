@@ -21,7 +21,7 @@ pub struct SaveFile {
 
 /// A pending notice / message box in the dynamic state (`FUN_0050de20`,
 /// 0x14c bytes in memory at `0x726d00`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Notice {
     pub offset: usize,
     pub len: usize,

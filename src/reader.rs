@@ -114,3 +114,8 @@ pub fn fixed_cstr(b: &[u8]) -> String {
     let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
     decode_cp1252(&b[..end])
 }
+
+/// Serialize a fixed-size byte array of any length (serde only covers ≤ 32).
+pub fn ser_bytes<S: serde::Serializer, const N: usize>(b: &[u8; N], s: S) -> std::result::Result<S::Ok, S::Error> {
+    s.collect_seq(b.iter())
+}

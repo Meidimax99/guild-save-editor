@@ -1,4 +1,4 @@
-//! GUI for `guild-save-edit`.
+//! Players / AI hand-over view.
 //!
 //! 1. Scan a folder tree with the players' network saves.
 //! 2. Pick a save point; every player's copy of it is loaded together.
@@ -19,30 +19,6 @@ const BLUE: egui::Color32 = egui::Color32::from_rgb(90, 170, 255);
 const AMBER: egui::Color32 = egui::Color32::from_rgb(230, 170, 60);
 const GREEN: egui::Color32 = egui::Color32::from_rgb(110, 190, 110);
 
-fn main() -> eframe::Result {
-    let initial = std::env::args().nth(1).map(PathBuf::from);
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 700.0]).with_title("Gilde Savegame Editor"),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "guild-save-edit",
-        options,
-        Box::new(move |_cc| {
-            let mut app = App::default();
-            if let Some(p) = initial {
-                app.root_input = p.display().to_string();
-                if p.is_dir() {
-                    app.start_scan(p);
-                } else {
-                    app.open_single(&p);
-                }
-            }
-            Ok(Box::new(app))
-        }),
-    )
-}
-
 struct Scan {
     root: PathBuf,
     /// Adding to the open save instead of listing saves.
@@ -58,8 +34,8 @@ enum Output {
     Folder,
 }
 
-struct App {
-    root_input: String,
+pub struct App {
+    pub root_input: String,
     scan: Option<Scan>,
     /// Save points of the last scan.
     found: Vec<Found>,
@@ -92,7 +68,7 @@ impl Default for App {
 }
 
 impl App {
-    fn start_scan(&mut self, root: PathBuf) {
+    pub fn start_scan(&mut self, root: PathBuf) {
         self.spawn_scan(root, false);
     }
 
@@ -149,7 +125,7 @@ impl App {
         self.session = Some(sess);
     }
 
-    fn open_single(&mut self, path: &Path) {
+    pub fn open_single(&mut self, path: &Path) {
         match session::Copy::load(path, None) {
             Ok(c) => {
                 let key = c.key();
@@ -492,8 +468,8 @@ impl App {
     }
 }
 
-impl eframe::App for App {
-    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+impl App {
+    pub fn show(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
         self.poll_scan();
         egui::Panel::top("top").show(root, |ui| {

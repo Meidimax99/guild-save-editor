@@ -31,7 +31,7 @@ fn key_slots(v: Ver) -> usize {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ObjectKind {
     Camera,
     Mesh,
@@ -62,7 +62,7 @@ impl ObjectKind {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct LightKey {
     pub a: u32,
     pub b: u32,
@@ -73,7 +73,7 @@ pub struct LightKey {
     pub extra: [u32; 2],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SceneObject {
     pub name: String,
     pub kind: ObjectKind,
@@ -130,7 +130,7 @@ impl SceneObject {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WaterRegion {
     pub texture: String,
     pub bytes: [u8; 7],
@@ -142,7 +142,7 @@ pub struct WaterRegion {
     pub c: u32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Floor {
     pub name: String,
     /// Element size of the per-cell arrays (the grid's cells-per-row in practice).
@@ -158,14 +158,14 @@ pub struct Floor {
     pub offset: Option<Vec3>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct LightSet {
     pub ambient: Vec3,
     pub ambient2: Option<Vec3>,
     pub entries: Vec<[u32; 3]>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Scene {
     pub version: u32,
     pub camera: String,
@@ -179,7 +179,7 @@ pub struct Scene {
     pub properties: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Group {
     pub version: u32,
     pub objects: Vec<SceneObject>,
