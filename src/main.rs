@@ -102,7 +102,11 @@ fn cmd_info(path: &Path) -> Result<()> {
         w.objects.len(),
         w.cities.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")
     );
-    println!("local player character: {}", w.characters.g71da90);
+    println!(
+        "human players: {} recorded in header, {} characters marked human",
+        s.header_human_count(),
+        ops::human_count(&s)
+    );
     if !s.is_snapshot() {
         match s.notices() {
             Ok(n) => println!("pending notices: {}", n.notices.len()),
@@ -117,7 +121,7 @@ fn cmd_info(path: &Path) -> Result<()> {
 fn print_players(s: &SaveFile, all: bool) {
     println!("{:>5}  {:<24} {:<26} {:<16} kind", "id", "role", "name", "dynasty");
     for c in s.world.characters.list.iter().filter(|c| all || is_player(c)) {
-        let local = if c.id == s.world.characters.g71da90 { "  (local)" } else { "" };
+        let local = "";
         println!(
             "{:>5}  {:<24} {:<26} {:<16} {}{local}",
             c.id,

@@ -6,18 +6,22 @@ use crate::world::Character;
 use anyhow::{Result, bail};
 
 /// Character kinds (`+0x02`) relevant for players.
-pub const KIND_AI_CONVERTED: u8 = 5;
-pub const KIND_HUMAN: u8 = 6;
-pub const KIND_AI: u8 = 7;
+///
+/// Every machine in a network game saves its own copy. In that copy its own
+/// character is `6` and the other humans are `7`; computer dynasties are `5`.
+/// On load the local player is the character with kind `6`.
+pub const KIND_AI: u8 = 5;
+pub const KIND_HUMAN_LOCAL: u8 = 6;
+pub const KIND_HUMAN_REMOTE: u8 = 7;
 
 pub fn kind_name(k: u8) -> &'static str {
     match k {
         0 => "npc",
         1 => "master npc",
         2 => "politician npc",
-        KIND_AI_CONVERTED => "AI player (taken over)",
-        KIND_HUMAN => "human player",
         KIND_AI => "AI player",
+        KIND_HUMAN_LOCAL => "human (owner of this file)",
+        KIND_HUMAN_REMOTE => "human (other player)",
         8 => "used player",
         9 => "invisible npc",
         15 => "dead",
@@ -26,7 +30,7 @@ pub fn kind_name(k: u8) -> &'static str {
 }
 
 pub fn is_player(c: &Character) -> bool {
-    matches!(c.f02, KIND_AI_CONVERTED | KIND_HUMAN | KIND_AI)
+    matches!(c.f02, KIND_AI | KIND_HUMAN_LOCAL | KIND_HUMAN_REMOTE)
 }
 
 pub fn full_name(c: &Character) -> String {
@@ -52,22 +56,39 @@ pub fn date(s: &SaveFile) -> (i32, i32, u16, i32) {
     (round, 1400 + round, hour, minute)
 }
 
+pub fn is_human(c: &Character) -> bool {
+    matches!(c.f02, KIND_HUMAN_LOCAL | KIND_HUMAN_REMOTE)
+}
+
 pub fn human_count(s: &SaveFile) -> usize {
-    s.world.characters.list.iter().filter(|c| c.f02 == KIND_HUMAN).count()
+    s.world.characters.list.iter().filter(|c| is_human(c)).count()
+}
+
+/// Keep the header's human-player count in line with the characters.
+fn sync_header_count(s: &mut SaveFile, log: &mut Vec<String>) {
+    let old = s.header_human_count();
+    let new = human_count(s).min(255) as u8;
+    if old != new {
+        s.set_header_human_count(new);
+        log.push(format!("  human players in header: {old} -> {new}"));
+    }
 }
 
 /// Hand a human player's character to the AI, as the game does when a player
 /// leaves (`FUN_00527c60`). Returns log lines.
 pub fn to_ai(s: &mut SaveFile, id: u16, keep_notices: bool) -> Result<Vec<String>> {
     let c = s.character(id)?;
-    if c.f02 != KIND_HUMAN {
+    if !is_human(c) {
         bail!("character {id} ({}) is {}, not a human player", full_name(c), kind_name(c.f02));
     }
     let mut log = vec![format!("{}: {} ({}) -> AI", s.path.display(), full_name(c), dynasty_name(s, c))];
-    if human_count(s) == 1 {
-        log.push(format!("warning: {} was the only human player; the game may treat this as game over", full_name(c)));
+    if c.f02 == KIND_HUMAN_LOCAL {
+        log.push(format!(
+            "warning: {} owns this copy of the save; whoever loads it now has no character of their own",
+            full_name(c)
+        ));
     }
-    s.set_kind(id, KIND_AI_CONVERTED)?;
+    s.set_kind(id, KIND_AI)?;
     s.clear_slots(id)?;
     if !s.is_snapshot() && !keep_notices {
         let sec = s.notices()?;
@@ -84,6 +105,8 @@ pub fn to_ai(s: &mut SaveFile, id: u16, keep_notices: bool) -> Result<Vec<String
         }
     }
     s.reparse()?;
+    sync_header_count(s, &mut log);
+    s.reparse()?;
     Ok(log)
 }
 
@@ -95,14 +118,16 @@ pub fn set_kind(s: &mut SaveFile, id: u16, kind: u8, expect: Option<&[u8]>) -> R
     {
         bail!("character {id} ({}) is {}, which cannot be changed this way", full_name(c), kind_name(c.f02));
     }
-    let log = vec![format!("{}: {} kind {} -> {kind} ({})", s.path.display(), full_name(c), c.f02, kind_name(kind))];
+    let mut log = vec![format!("{}: {} kind {} -> {kind} ({})", s.path.display(), full_name(c), c.f02, kind_name(kind))];
     s.set_kind(id, kind)?;
+    s.reparse()?;
+    sync_header_count(s, &mut log);
     s.reparse()?;
     Ok(log)
 }
 
 pub fn to_human(s: &mut SaveFile, id: u16) -> Result<Vec<String>> {
-    set_kind(s, id, KIND_HUMAN, Some(&[KIND_AI, KIND_AI_CONVERTED]))
+    set_kind(s, id, KIND_HUMAN_REMOTE, Some(&[KIND_AI]))
 }
 
 /// Write a save, keeping `<name>.bak` when overwriting the original.

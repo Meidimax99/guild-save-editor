@@ -2,7 +2,7 @@
 //! human and AI, save.
 
 use eframe::egui;
-use guild_save_edit::ops::{self, KIND_AI, KIND_AI_CONVERTED, KIND_HUMAN};
+use guild_save_edit::ops::{self, KIND_AI, KIND_HUMAN_LOCAL, KIND_HUMAN_REMOTE};
 use guild_save_edit::save::{SaveFile, companions};
 use std::path::{Path, PathBuf};
 
@@ -165,6 +165,12 @@ impl App {
             ui.label("Files");
             ui.label(self.files.iter().map(|f| f.path.file_name().unwrap_or_default().to_string_lossy()).collect::<Vec<_>>().join(" + "));
             ui.end_row();
+            ui.label("Human players");
+            ui.label(format!(
+                "{} (header; the host waits for this many when loading)",
+                s.header_human_count()
+            ));
+            ui.end_row();
             ui.label("Contents");
             ui.label(format!(
                 "{} characters, {} buildings, version {:#x}",
@@ -183,8 +189,8 @@ impl App {
         }
         let mut action = None;
         let s = &self.files[0];
-        let local = s.world.characters.g71da90;
-        let humans = ops::human_count(s);
+        let owner_ids: Vec<u16> =
+            s.world.characters.list.iter().filter(|c| c.f02 == KIND_HUMAN_LOCAL).map(|c| c.id).collect();
         let rows: Vec<_> = s.world.characters.list.iter().filter(|c| self.show_all || ops::is_player(c)).collect();
         egui::ScrollArea::vertical().max_height(ui.available_height() - 150.0).show(ui, |ui| {
             egui::Grid::new("players").striped(true).num_columns(6).spacing([14.0, 4.0]).show(ui, |ui| {
@@ -195,26 +201,22 @@ impl App {
                 for c in rows {
                     ui.label(c.id.to_string());
                     let name = ops::full_name(c);
-                    if c.id == local {
-                        ui.label(format!("{name}  (local)")).on_hover_text("The player sitting at the machine that saved the game");
-                    } else {
-                        ui.label(name);
-                    }
+                    ui.label(name);
                     ui.label(ops::dynasty_name(s, c));
                     let role = ops::kind_name(c.f02);
                     match c.f02 {
-                        KIND_HUMAN => ui.colored_label(egui::Color32::from_rgb(90, 170, 255), role),
-                        KIND_AI | KIND_AI_CONVERTED => ui.colored_label(egui::Color32::from_rgb(230, 170, 60), role),
+                        KIND_HUMAN_LOCAL | KIND_HUMAN_REMOTE => ui.colored_label(egui::Color32::from_rgb(90, 170, 255), role),
+                        KIND_AI => ui.colored_label(egui::Color32::from_rgb(230, 170, 60), role),
                         _ => ui.label(format!("{role} ({})", c.f02)),
                     };
                     match c.f02 {
-                        KIND_HUMAN => {
+                        KIND_HUMAN_LOCAL | KIND_HUMAN_REMOTE => {
                             if ui.button("Hand to AI").clicked() {
                                 action = Some(Action::ToAi(c.id));
                             }
                         }
-                        KIND_AI | KIND_AI_CONVERTED => {
-                            if ui.button("Make human").clicked() {
+                        KIND_AI => {
+                            if ui.button("Make human").on_hover_text("Marks the dynasty as another human player's (kind 7)").clicked() {
                                 action = Some(Action::ToHuman(c.id));
                             }
                         }
@@ -229,7 +231,7 @@ impl App {
         });
         let keep = self.keep_notices;
         match action {
-            Some(Action::ToAi(id)) if humans == 1 => self.confirm_last_human = Some(id),
+            Some(Action::ToAi(id)) if owner_ids.contains(&id) => self.confirm_last_human = Some(id),
             Some(Action::ToAi(id)) => self.apply(|s| ops::to_ai(s, id, keep)),
             Some(Action::ToHuman(id)) => self.apply(|s| ops::to_human(s, id)),
             None => {}
@@ -302,8 +304,8 @@ impl eframe::App for App {
         });
 
         if let Some(id) = self.confirm_last_human {
-            egui::Window::new("Last human player").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(&ctx, |ui| {
-                ui.label("This is the only human player left. Without a human player the game may end when the save is loaded.");
+            egui::Window::new("Owner of this save").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(&ctx, |ui| {
+                ui.label("In a network game every player has their own copy of the save, and this character is the player who owns this copy. If you hand it to the AI, whoever loads this file has no character of their own.");
                 ui.horizontal(|ui| {
                     if ui.button("Hand to AI anyway").clicked() {
                         let keep = self.keep_notices;

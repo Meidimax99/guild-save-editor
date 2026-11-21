@@ -76,6 +76,19 @@ impl SaveFile {
         Ok(())
     }
 
+    /// File offset of header byte `+0x31`: the number of human players in a
+    /// network game (`DAT_0064db2c` when saving; the host waits for this many
+    /// players when the save is loaded, `FUN_00520e00`).
+    pub const HUMAN_COUNT_OFFSET: usize = 4 + 1 + 0x20 + 8 + 1;
+
+    pub fn header_human_count(&self) -> u8 {
+        self.raw[Self::HUMAN_COUNT_OFFSET]
+    }
+
+    pub fn set_header_human_count(&mut self, n: u8) {
+        self.raw[Self::HUMAN_COUNT_OFFSET] = n;
+    }
+
     pub fn set_kind(&mut self, id: u16, kind: u8) -> Result<u8> {
         let c = self.character(id)?;
         let (off, old) = (c.kind_offset, c.f02);

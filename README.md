@@ -4,7 +4,7 @@ A small standalone tool to inspect and edit savegames of *Die Gilde Gold*
 (The Guild Gold, version 2.05, save format `0x1005a`).
 
 Its main purpose: **hand a human player's dynasty to the computer**, so a
-multiplayer game can go on after someone can no longer play. It can also do
+network game can go on after someone can no longer play. It can also do
 the reverse and hand an AI dynasty to a human.
 
 ## Build
@@ -59,32 +59,66 @@ Other commands: `character <save> <id>` (decoded fields of one character),
 Every written file is decompressed and parsed again before it replaces
 anything. If an edit fails for either file of the pair, neither is written.
 
+## Network games: who is which character
+
+Every machine in a network game writes **its own copy** of the save into
+`Resources/gamedata/network/` (`NAME.SAV` + `NAME.SRV`). The copies hold the
+same world. Two things differ:
+
+* **Character kind** (`+0x02`): in each copy, the character of the player
+  who owns that copy is `6`, the other humans are `7`, and computer
+  dynasties are `5`.
+* **Header**: the owner's name, gender, religion, profession, and coat of
+  arms. The lobby uses these as that player's identity when they rejoin.
+
+When loading, the game makes the kind-`6` character the local player
+(`FUN_00529910`). So a reconnecting player gets their character because
+they load their own copy. The lobby doesn't map players to characters
+explicitly.
+
+The header also holds:
+
+* `+0x31`: the number of human players. The host waits for that many
+  players when it loads the save (`FUN_00520e00`), and the game splits the
+  AI work across that many machines.
+* `+0x78`: eight checksums, one per human player's copy. A client lists a
+  hosted saved game only if its own copy has the same checksum list
+  (`FUN_00521130`), so all copies must come from the same save.
+
+A single file can tell you which character its owner plays (kind `6`) and
+the names of the others (kind `7`). It can't tell you which machine or
+person plays each kind-`7` character.
+
+Both files are needed: a network load reads the `.SRV` first, then the
+`.SAV` (`FUN_004ff4c0`).
+
 ## What `to-ai` changes
 
-This mirrors what the game itself does when a human player drops out
-(`FUN_00527c60` in `GildeGold_TL.exe`):
+This mirrors what the game does with a player's character in `FUN_00527c60`:
 
-* The character's kind byte (`+0x02`) goes from `6` (human player) to `5`
-  (AI player that took over). Original AI dynasties use `7`.
+* The kind byte goes from `7` (or `6`) to `5` (AI).
 * The eight per-character action slots at `+0x5c` are reset to `-1`.
-* Pending notices of that character which need a human decision are removed
-  from the `.SAV` (debt warnings, offers, and so on: kinds `0x11 0x2d 0x2e
-  0x30 0x35 0x41 0x42 0x46 0x4b 0x5a 0x5b 0x5c 0x5d 0x60`). Pass
-  `--keep-notices` to keep them.
+* That character's pending notices that need a human decision are removed
+  from the `.SAV` (kinds `0x11 0x2d 0x2e 0x30 0x35 0x41 0x42 0x46 0x4b 0x5a
+  0x5b 0x5c 0x5d 0x60`; `--keep-notices` keeps them).
+* The header's human-player count (`+0x31`) is set to the new number of
+  human characters. The checksum list is left alone.
 
-Unlike the game, the tool does **not** give the character a new random first
-name or a new dynasty id. The dynasty keeps its name, family, buildings,
-and money.
+`to-human` does the reverse: it sets kind `7` and raises the count.
+
+**To continue without a player**, apply the same `to-ai` edit to every
+remaining player's copy, both `.SAV` and `.SRV`, then load as usual. The
+copies must stay identical apart from each owner's own kind `6`, because
+the game simulates all of them in lockstep.
+
+The character keeps its name, family, dynasty, buildings, and money.
 
 ## Caveats
 
-* Only tested by parsing the result again. Load the edited save in the game
-  before relying on it.
-* The save stores which character is the *local* player (`(local)` in the
-  listing; usually the host). Don't convert that one unless you mean to: if
-  no human player is left, the game may end.
-* In a multiplayer game, the host loads the edited save and the others join
-  as usual.
+* Only tested by parsing the result again. Try the edited saves in the game
+  before relying on them.
+* Converting a kind-`6` character leaves whoever loads that copy without
+  a character of their own. The tool warns about this.
 
 ## Format notes
 
@@ -92,11 +126,11 @@ and money.
   city files (header flags `5` = save, `6` = snapshot), then the embedded
   `.ed3` city scene, then (in `.SAV` only) about 8 MB of dynamic simulation
   state.
-* Characters are 0x21c-byte records in memory (array at `0x79cd40`). Kind
-  names come from the game's debug table at `0x637d70`: `0` DUMMY_NPC,
-  `1` MEISTER_NPC, `2` POLITICIAN_NPC, `5` PLAYER, `6` REMOTE_PLAYER,
-  `7` RELATIVE_PLAYER, `8` USED_PLAYER, `9` INVISIBLE_NPC, plus `15` = dead
-  (`gm_KillSpieler`). Game logic treats `6` as human (round processing and
-  game over when no living `6` is left), and `5`/`7` as computer dynasties.
+* Characters are 0x21c-byte records in memory (array at `0x79cd40`).
+  Player kinds: `5` AI dynasty, `6` human playing on this machine, `7`
+  human on another machine. When saving, the network player count is the
+  number of `6`/`7` characters (`FUN_005c55c0`). The game's debug name
+  table at `0x637d70` (`PLAYER`, `REMOTE_PLAYER`, `RELATIVE_PLAYER`, …)
+  looks out of date and doesn't match this. `15` = dead (`gm_KillSpieler`).
 * The parsers in `src/world.rs`, `src/scene.rs` and `src/reader.rs` are
   copied from the `gilde-rs` reimplementation so this tool stands alone.
