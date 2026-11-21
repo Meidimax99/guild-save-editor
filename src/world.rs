@@ -267,6 +267,8 @@ pub struct Character {
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Characters {
+    /// File offset of `g71da90` (the local player's character slot).
+    pub g71da90_offset: usize,
     pub g71da90: u16,
     pub g71d0cc: u32,
     pub g71d0d0: u32,
@@ -604,7 +606,8 @@ fn read_dynasties(r: &mut Reader, v: u32) -> Result<Vec<Dynasty>> {
 }
 
 fn read_characters(r: &mut Reader, v: u32) -> Result<Characters> {
-    let mut cs = Characters { g71da90: r.u16()?, ..Default::default() };
+    let g71da90_offset = r.pos();
+    let mut cs = Characters { g71da90_offset, g71da90: r.u16()?, ..Default::default() };
     let n = r.i32()?;
     cs.g71d0cc = r.u32()?;
     cs.g71d0d0 = r.u32()?;

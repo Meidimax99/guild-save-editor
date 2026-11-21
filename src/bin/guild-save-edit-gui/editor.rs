@@ -46,6 +46,8 @@ pub struct App {
     output: Output,
     out_dir: String,
     confirm: bool,
+    /// Copy used as the source for generating missing players' copies.
+    gen_source: usize,
     log: Vec<String>,
 }
 
@@ -62,6 +64,7 @@ impl Default for App {
             output: Output::Folder,
             out_dir: String::new(),
             confirm: false,
+            gen_source: 0,
             log: Vec::new(),
         }
     }
@@ -239,6 +242,8 @@ impl App {
     fn session_view(&mut self, ui: &mut egui::Ui) {
         let mut add_files = Vec::new();
         let mut add_folder = None;
+        let mut generate = None;
+        let mut remove_generated = false;
         let mut back = false;
         {
             let sess = self.session.as_ref().unwrap();
@@ -298,6 +303,12 @@ impl App {
                         match s.copy {
                             Some(i) => {
                                 let c = &sess.copies[i];
+                                if let Some(from) = &c.generated_from {
+                                    ui.colored_label(AMBER, format!("generated from {from}'s copy — written on Apply"))
+                                        .on_hover_text(c.notes.join("\n"));
+                                    ui.end_row();
+                                    continue;
+                                }
                                 let mut text = format!("{}   ({})", c.sav.path.display(), session::time_text(c.modified));
                                 if !c.twins.is_empty() {
                                     text += &format!("   +{} identical", c.twins.len());
@@ -362,6 +373,41 @@ impl App {
                 ui.checkbox(&mut self.keep_notices, "keep pending notices")
                     .on_hover_text("By default, open message boxes of the handed-over player that need a human decision are cancelled, like the game does when a player leaves.");
             });
+            let real: Vec<(usize, String)> = sess
+                .copies
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.generated_from.is_none())
+                .map(|(i, c)| (i, c.owner_name()))
+                .collect();
+            let n_missing = sess.missing().len();
+            let n_generated = sess.copies.iter().filter(|c| c.generated_from.is_some()).count();
+            if (n_missing > 0 || n_generated > 0) && !real.is_empty() {
+                ui.horizontal(|ui| {
+                    if !real.iter().any(|(i, _)| *i == self.gen_source) {
+                        self.gen_source = real[0].0;
+                    }
+                    let current = real.iter().find(|(i, _)| *i == self.gen_source).map(|(_, n)| n.clone()).unwrap_or_default();
+                    ui.label("Generate missing copies from:");
+                    egui::ComboBox::from_id_salt("gen_source").selected_text(current).show_ui(ui, |ui| {
+                        for (i, n) in &real {
+                            ui.selectable_value(&mut self.gen_source, *i, n);
+                        }
+                    });
+                    if ui
+                        .add_enabled(n_missing > 0, egui::Button::new(format!("Generate {n_missing}")))
+                        .on_hover_text(
+                            "Create the missing players' copies from this player's copy, as their own machines would have written them (owner, local player and header identity changed). They are written on Apply.",
+                        )
+                        .clicked()
+                    {
+                        generate = Some(self.gen_source);
+                    }
+                    if n_generated > 0 && ui.button(format!("Remove {n_generated} generated")).clicked() {
+                        remove_generated = true;
+                    }
+                });
+            }
             ui.horizontal(|ui| {
                 ui.label("Write to:");
                 ui.radio_value(&mut self.output, Output::Folder, "new folder (one sub-folder per player)");
@@ -379,12 +425,13 @@ impl App {
                 });
             }
             ui.horizontal(|ui| {
-                let can = !self.to_ai.is_empty() && (self.output == Output::InPlace || !self.out_dir.is_empty());
+                let work = !self.to_ai.is_empty() || n_generated > 0;
+                let can = work && (self.output == Output::InPlace || !self.out_dir.is_empty());
                 if ui.add_enabled(can, egui::Button::new("Apply to all loaded copies…")).clicked() {
                     self.confirm = true;
                 }
-                if self.to_ai.is_empty() {
-                    ui.label("Tick the players to hand to the AI.");
+                if !work {
+                    ui.label("Tick the players to hand to the AI, or generate missing copies.");
                 }
             });
         }
@@ -398,6 +445,17 @@ impl App {
         if let Some(dir) = add_folder {
             self.spawn_scan(dir, true);
         }
+        if let Some(src) = generate {
+            let sess = self.session.as_mut().unwrap();
+            match sess.generate_missing(src) {
+                Ok(l) => self.log.extend(l),
+                Err(e) => self.log.push(format!("error: {e:#}")),
+            }
+        }
+        if remove_generated {
+            let n = self.session.as_mut().unwrap().remove_generated();
+            self.log.push(format!("removed {n} generated cop(ies)"));
+        }
         if back {
             self.back_to_list();
         }
@@ -410,6 +468,12 @@ impl App {
         let sess = self.session.as_ref().unwrap();
         let seats = sess.seats();
         let names: Vec<String> = seats.iter().filter(|s| self.to_ai.contains(&s.id)).map(|s| s.name.clone()).collect();
+        let generated: Vec<String> = sess
+            .copies
+            .iter()
+            .filter(|c| c.generated_from.is_some() && !c.owner.is_some_and(|o| self.to_ai.contains(&o)))
+            .map(|c| c.owner_name())
+            .collect();
         let missing: Vec<String> = seats
             .iter()
             .filter(|s| s.copy.is_none() && !self.to_ai.contains(&s.id))
@@ -422,7 +486,15 @@ impl App {
         };
         let mut go = None;
         egui::Window::new("Apply changes").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
-            ui.label(format!("Hand to the AI: {}", names.join(", ")));
+            if !names.is_empty() {
+                ui.label(format!("Hand to the AI: {}", names.join(", ")));
+            }
+            if !generated.is_empty() {
+                ui.label(format!("Write generated copies for: {}", generated.join(", ")));
+                if self.output == Output::InPlace {
+                    ui.colored_label(AMBER, "Generated copies go to <scanned folder>/<player name>/ (existing files are not overwritten).");
+                }
+            }
             ui.label(format!("Files to write: {files}"));
             ui.label(match self.output {
                 Output::InPlace => "Edited in place; originals are kept as .bak.".to_string(),

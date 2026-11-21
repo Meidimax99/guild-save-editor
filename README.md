@@ -53,7 +53,12 @@ guild-save-edit-gui [folder-or-save]
    - A byte-identical second copy of a player is edited along with it.
    - A *different* copy of the same player is reported and left alone.
    - Not every player's copy has to be present.
-4. Tick **Hand to AI** for the players who left, then **Apply**. Every
+4. Players without a copy can get one: **Generate missing copies from**
+   a chosen player's copy rewrites the owner identity (type 6, local
+   player, header name, coat of arms and so on) exactly as that player's
+   own machine would have written it. Generated copies are written on
+   **Apply**.
+5. Tick **Hand to AI** for the players who left, then **Apply**. Every
    loaded copy (`.SAV` and `.SRV`) is edited the same way. The output goes
    either in place (originals kept as `.bak`) or into a new folder with one
    sub-folder per player: `<out>/<player name>/NAME.SAV` and `.SRV`, ready

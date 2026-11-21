@@ -89,6 +89,44 @@ impl SaveFile {
         self.raw[Self::HUMAN_COUNT_OFFSET] = n;
     }
 
+    /// Turn this copy into the copy of another human player (`target`): what
+    /// the game would have written on that player's machine. Patches the
+    /// character kinds (target 6, other humans 7), the local player slot and
+    /// the header owner fields (name, profession, religion, coat of arms,
+    /// gender; selection cleared). Header wealth (`f68`, display only) keeps
+    /// the source value. Requires save version > 0x10053 (header layout).
+    pub fn make_owner(&mut self, target: u16) -> Result<()> {
+        ensure!(self.version() > 0x10053, "unsupported save version {:#x}", self.version());
+        let t = self.character(target)?.clone();
+        ensure!(matches!(t.f02, 6 | 7), "character {target} is not a human player");
+        let humans: Vec<(usize, u16)> =
+            self.world.characters.list.iter().filter(|c| matches!(c.f02, 6 | 7)).map(|c| (c.kind_offset, c.id)).collect();
+        for (off, id) in humans {
+            self.raw[off] = if id == target { 6 } else { 7 };
+        }
+        let slot = self.world.characters.g71da90_offset;
+        self.raw[slot..slot + 2].copy_from_slice(&target.to_le_bytes());
+        // Header owner fields (file offsets for v > 0x10053).
+        let h = &mut self.raw;
+        h[0x3d..0x4d].copy_from_slice(&t.f30);
+        h[0x4d..0x5d].copy_from_slice(&t.f40);
+        h[0x5d] = t.f0c;
+        h[0x5e..0x62].copy_from_slice(&(t.f54 as u32).to_le_bytes());
+        h[0x62] = t.f164[0];
+        h[0x63] = t.f164[2];
+        h[0x64] = t.f0d;
+        h[0x69] = t.f09;
+        h[0x6b..0x73].fill(0xff);
+        self.reparse()?;
+        // Read back to make sure the offsets hit the intended fields.
+        let hd = &self.world.header;
+        ensure!(
+            hd.f40 == t.f30.to_vec() && hd.f50 == t.f40.to_vec() && hd.f63 == t.f0c && self.world.characters.g71da90 == target,
+            "header layout check failed"
+        );
+        Ok(())
+    }
+
     pub fn set_kind(&mut self, id: u16, kind: u8) -> Result<u8> {
         let c = self.character(id)?;
         let (off, old) = (c.kind_offset, c.f02);

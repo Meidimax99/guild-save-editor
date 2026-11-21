@@ -47,6 +47,9 @@ pub struct Copy {
     pub notes: Vec<String>,
     /// Byte-identical copies found elsewhere; they get the same edits.
     pub twins: Vec<Copy>,
+    /// Set for a copy generated from another player's copy (not yet written);
+    /// holds that player's name.
+    pub generated_from: Option<String>,
 }
 
 impl Copy {
@@ -98,7 +101,7 @@ impl Copy {
         }
         let rel = root.and_then(|r| sav_path.strip_prefix(r).ok()).map(Path::to_path_buf);
         let modified = std::fs::metadata(sav_path).and_then(|m| m.modified()).ok();
-        Ok(Copy { sav, srv, rel, modified, owner, header_owner, notes, twins: Vec::new() })
+        Ok(Copy { sav, srv, rel, modified, owner, header_owner, notes, twins: Vec::new(), generated_from: None })
     }
 
     pub fn key(&self) -> SaveKey {
@@ -362,6 +365,70 @@ impl Session {
         }
     }
 
+    /// Human players without a copy.
+    pub fn missing(&self) -> Vec<u16> {
+        self.seats().iter().filter(|s| s.copy.is_none() && is_human_kind(s.kind)).map(|s| s.id).collect()
+    }
+
+    /// Create the copies of all players without one from the loaded copy at
+    /// `from`, as their own machines would have written them
+    /// (`SaveFile::make_owner`). They are written by `apply`.
+    pub fn generate_missing(&mut self, from: usize) -> Result<Vec<String>> {
+        let missing = self.missing();
+        if missing.is_empty() {
+            bail!("every human player already has a copy");
+        }
+        let src = self.copies.get(from).context("no such copy")?;
+        if src.generated_from.is_some() {
+            bail!("choose a real copy as the source");
+        }
+        let src_name = src.owner_name();
+        let mut new = Vec::new();
+        for id in missing {
+            let make = |f: &SaveFile| -> Result<SaveFile> {
+                let mut g = SaveFile { path: f.path.clone(), raw: f.raw.clone(), world: f.world.clone() };
+                g.make_owner(id)?;
+                Ok(g)
+            };
+            let mut sav = make(&src.sav)?;
+            let name = ops::full_name(sav.character(id)?);
+            let virt = |f: &Path| PathBuf::from("<generated>").join(sanitize(&name)).join(f.file_name().unwrap_or_default());
+            sav.path = virt(&src.sav.path);
+            let srv = match &src.srv {
+                Some(s) => {
+                    let mut g = make(s)?;
+                    g.path = virt(&s.path);
+                    Some(g)
+                }
+                None => None,
+            };
+            new.push(Copy {
+                sav,
+                srv,
+                rel: None,
+                modified: None,
+                owner: Some(id),
+                header_owner: name.clone(),
+                notes: vec![format!("generated from {src_name}'s copy; header wealth value copied from it")],
+                twins: Vec::new(),
+                generated_from: Some(src_name.clone()),
+            });
+        }
+        let mut log = Vec::new();
+        for c in new {
+            log.push(format!("generated copy for {} from {src_name}'s copy", c.owner_name()));
+            self.add(c)?;
+        }
+        Ok(log)
+    }
+
+    /// Drop generated copies that have not been written yet.
+    pub fn remove_generated(&mut self) -> usize {
+        let before = self.copies.len();
+        self.copies.retain(|c| c.generated_from.is_none());
+        before - self.copies.len()
+    }
+
     /// Every copy including twins.
     pub fn all_copies(&self) -> impl Iterator<Item = &Copy> {
         self.copies.iter().flat_map(|c| std::iter::once(c).chain(c.twins.iter()))
@@ -370,10 +437,16 @@ impl Session {
     /// Hand the given characters to the AI in every loaded copy and write
     /// the results. `out_dir = None` edits in place (keeping `.bak` files).
     pub fn apply(&mut self, to_ai: &[u16], keep_notices: bool, out_dir: Option<&Path>) -> Result<Vec<String>> {
-        if to_ai.is_empty() {
-            bail!("no player selected");
-        }
         let mut log = Vec::new();
+        // A generated copy for a player who is handed to the AI is pointless.
+        let before = self.copies.len();
+        self.copies.retain(|c| c.generated_from.is_none() || !c.owner.is_some_and(|o| to_ai.contains(&o)));
+        if self.copies.len() != before {
+            log.push(format!("dropped {} generated cop(ies) of players handed to the AI", before - self.copies.len()));
+        }
+        if to_ai.is_empty() && !self.copies.iter().any(|c| c.generated_from.is_some()) {
+            bail!("nothing to do: no player selected and no generated copies");
+        }
         // Edit everything in memory first; write only if all edits succeed.
         // In folder mode every player gets one folder, so identical twins
         // (same player) are not written separately.
@@ -391,10 +464,18 @@ impl Session {
                         }
                     }
                     let dst = match out_dir {
+                        None if copy.generated_from.is_some() => Some(self.output_path(copy, &f.path, &self.generated_base())),
                         None => Some(f.path.clone()),
                         Some(_) if twin => None,
                         Some(d) => Some(self.output_path(copy, &f.path, d)),
                     };
+                    if copy.generated_from.is_some()
+                        && out_dir.is_none()
+                        && let Some(d) = &dst
+                        && d.exists()
+                    {
+                        bail!("{} already exists; not overwriting it with a generated copy", d.display());
+                    }
                     edited.push((f, dst));
                 }
             }
@@ -420,11 +501,24 @@ impl Session {
         };
         for c in &mut self.copies {
             update(c);
+            if c.generated_from.take().is_some() {
+                c.modified = Some(std::time::SystemTime::now());
+            }
             for t in &mut c.twins {
                 update(t);
             }
         }
         Ok(log)
+    }
+
+    /// Where generated copies go when editing in place: next to the scanned
+    /// players' folders, `<root>/<player name>/`.
+    fn generated_base(&self) -> PathBuf {
+        if let Some(r) = &self.root {
+            return r.clone();
+        }
+        let first = self.copies.iter().find(|c| c.generated_from.is_none()).map(|c| c.sav.path.clone()).unwrap_or_default();
+        first.parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default()
     }
 
     /// `out/<player name>/<file name>`: one folder per player whose copy it is.

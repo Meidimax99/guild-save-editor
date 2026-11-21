@@ -45,23 +45,28 @@ header writer `FUN_00507760`.
 ## 2. Header
 
 Offsets are file offsets in the decompressed data (v `0x1005a`). **verified**
-for the layout. The meaning of the owner fields is **from code**
-(`FUN_00507760`).
+on six players' copies of one save; the owner fields are written from the
+saving player's character (`FUN_00507760`).
 
 | Offset | Size | Meaning |
 |---|---|---|
 | `0x00` | 4 | version (`0x1005a`) |
 | `0x04` | 1 | flags: `5` = full save, `6` = snapshot; bit 1 = city form (no dynamic state) |
-| `0x05` | 32 | city name (`Nuernberg`) |
+| `0x05` | 32 | city name (`Nuernberg`), NUL-terminated; the bytes after the terminator are leftover memory |
 | `0x25` | 8 | ? |
 | `0x2d` | 1 | ? (8 in the sample saves; possibly max players) |
 | `0x2e` | 1 | **number of human players** in a network game (`DAT_0064db2c`) |
 | `0x2f` | 14 | game date (round, hour, minute, second) |
-| `0x3d` | 16 | **owner's first name**: the character playing on the saving machine |
-| `0x4d` | 16 | **owner's last name** |
-| … | | owner's gender, religion, profession, coat of arms (`+0x94` of the character, stored with `+0x59a` offset), more owner bytes, a computed u32 for the owner |
-| … | 8 × 4 | **checksum list** (header struct `+0x78`), one per human player's copy, unused slots 0 |
-| … | `0xe100` | 160 × 120 RGB thumbnail (a screenshot of the saving machine) |
+| `0x3d` | 16 | **owner's first name** (character `+0x30`): the character playing on the saving machine |
+| `0x4d` | 16 | **owner's last name** (character `+0x40`) |
+| `0x5d` | 1 | owner's religion (character `+0x0c`) |
+| `0x5e` | 4 | owner's coat of arms (character `+0x54`, i.e. the file value + `0x59a`) |
+| `0x62` | 3 | owner's profession (character `+0x164`, `+0x166`) and character `+0x0d` |
+| `0x65` | 4 | owner's total wealth (`FUN_004f8810`: cash plus possessions), display only |
+| `0x69` | 2 | owner's gender (character `+0x09`); second byte 2 in all samples |
+| `0x6b` | 2 × 4 | ids of the saving player's current selection, -1 if none |
+| `0x73` | 8 × 4 | **checksum list** (header struct `+0x78`), one per human player's copy, unused slots 0; identical in all copies |
+| `0x93` | `0xe100` | 160 × 120 RGB thumbnail (a screenshot of the saving machine) |
 | … | 4 | ? (`DAT_0071d8d4`) |
 | … | `0x60` | save name ("description", typed in the save dialog) |
 
@@ -212,21 +217,41 @@ end of the sample saves.
 4. Each machine then writes `gamedata/network/NAME.SRV` (flag 6) and
    `NAME.SAV` (flag 5) itself.
 
-As a result the copies **share the world** but differ in:
+**Verified** by comparing six players' copies of one save point
+(`GILDE_SAVEGAME_2`, 7 human players). Every copy contains the complete
+world; no copy holds data the others lack. They differ in three ways:
 
-| Differs per copy | |
-|---|---|
-| character kinds | the owner is 6, the other humans are 7 |
-| local player index | characters section |
-| header owner fields | name, gender, religion, profession, coat of arms, … |
-| thumbnail | that machine's screen |
-| network bookkeeping | probably the send queue / acknowledgements in dynamic section 8 (**open**) |
+1. **Owner identity** (exactly as the code writes it): character kinds (the
+   owner is 6, the other humans 7), the local player slot, and the header
+   owner fields from name to selection (§2).
+2. **Machine-local data**, which never matches between copies:
+   - each copy's notices include message boxes for its own player only
+     (8–13 extra per copy, all for the owner's character); the shared notices
+     are present everywhere;
+   - dynamic section 8b/8c: the 32768-entry network command log and its
+     acknowledgement slots, plus its counter (150754 … 443511), completely
+     different per machine;
+   - the thumbnail and header wealth value.
+3. **Small simulation divergence** between machines:
+   - 3 of 293 character slots hold transient NPCs of kind 20 that each
+     machine generated independently (different names, gender, looks);
+   - per-character timers and state (`+0x184`, `+0x19c`, `+0x17c`,
+     `+0x18c` ±1, `+0x1b4`, `+0x1c8`), in roughly 50–120 characters per pair;
+   - about 20 objects with different state (`+0x13`, `+0x1c`), and in two
+     copies one object less (each a different one);
+   - timed messages (section 8a): about 1650 of 8192 records differ;
+   - dynamic sections 1 and 3, and the tail after section 8.
 
-| Identical in all copies | |
+| Identical in all six copies | |
 |---|---|
-| header human count (`+0x31`) | |
-| header checksum list (`+0x78`) | holds all players' checksums |
-| save name, date, world | world assumed identical because the game runs in lockstep (**open** until a client copy is compared) |
+| header | version, flags, city, human count `+0x2e`, date, checksum list, save name |
+| world | 290 of 293 characters (identity, family, attributes), all buildings' identity, dynasties, cities, offices; objects identical apart from the divergence above |
+| dynamic state | sections 2 (both 768 × 768 grids), 4, 6 and 7 |
+
+The divergence in (3) exists between any two real copies, so the game
+loads and continues from copies that are not byte-identical. One copy (Amadeus
+Abdomen's) differs more than the others in timed messages and in its command
+log; it is probably the host's, but no host flag exists in the file.
 
 ### 6.2 Rejoining: the lobby needs the local copy
 
@@ -301,6 +326,30 @@ converts a human's character into an AI one:
 
 If no living kind-6 character is left, it sets game over (`DAT_0071da74`).
 
+### 6.7 Generating another player's copy
+
+Because the copies differ only as described in §6.1, one player's copy can
+be turned into any other player's copy by rewriting the owner identity:
+
+1. kind 6 for the new owner, kind 7 for every other human;
+2. the local player slot (characters section) to the new owner;
+3. header `0x3d..0x6b`: name, religion, coat of arms, profession and gender
+   from the new owner's character; the selection (`0x6b`) set to -1.
+
+**Verified** against the real copies: after these steps, a copy generated
+from Amadeus Abdomen's file has the same header (up to the checksum list),
+the same kinds and the same local player slot as Pastorius Pinkelmann's real
+copy. Only the wealth value differs. The rest differs exactly as much as
+between any two real copies. The checksum list needs no change, since it is
+identical in all copies. **Not yet tested in the game.**
+
+What a generated copy cannot reproduce:
+- the new owner's own pending message boxes, which only exist on their
+  machine (the source owner's remain, attached to a character that is no
+  longer local);
+- that machine's network command log and counters;
+- the wealth value shown in the load menu (the source's value is kept).
+
 ## 7. What the editor changes
 
 `to-ai` on one copy:
@@ -318,6 +367,12 @@ Deliberately unchanged:
 The same edit must be applied to **every remaining player's copy**, both
 `.SAV` and `.SRV`.
 
+`generate missing copies` (session view) creates the copies of players
+without one from a chosen player's copy, as described in §6.7, and writes
+them with the other copies: to `<out>/<player name>/`, or, when editing in
+place, to `<scanned folder>/<player name>/` (existing files are never
+overwritten).
+
 The session tool groups copies by (version, city, date, checksum list) and
 identifies each copy's owner by its kind-6 character.
 
@@ -326,7 +381,8 @@ only in the bytes listed above. **Not yet verified in the game.**
 
 ## 8. Open questions
 
-- Byte-level comparison of a host copy and a client copy of the same save.
+- Whether the game accepts a generated copy (§6.7); untested in the game.
+- Which machine was the host, and whether the host's copy matters on load.
 - The exact layout of dynamic sections 6–17.
 - Header bytes `0x25..0x2d` and the unnamed owner fields.
 - Whether the game rejects a copy whose own checksum no longer matches its
