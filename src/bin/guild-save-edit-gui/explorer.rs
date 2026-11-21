@@ -260,6 +260,18 @@ fn value_cell(ui: &mut egui::Ui, v: &Value) -> bool {
     false
 }
 
+/// Field name: the known meaning if there is one, raw name on hover.
+fn field_name(ui: &mut egui::Ui, scope: &str, key: &str) {
+    match explore::label(scope, key) {
+        Some(l) => {
+            ui.label(l).on_hover_text(key);
+        }
+        None => {
+            ui.colored_label(DIM, key);
+        }
+    }
+}
+
 fn child(nav: &[Step], s: Step) -> Vec<Step> {
     let mut n = nav.to_vec();
     n.push(s);
@@ -271,6 +283,7 @@ fn node_view(ui: &mut egui::Ui, node: &Value, nav: &[Step], cache: &Cache) -> Op
     egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| match node {
         Value::Object(m) => {
             let entries: Vec<(&String, &Value)> = m.iter().collect();
+            let scope = explore::scope_of(nav);
             TableBuilder::new(ui)
                 .id_salt("obj")
                 .striped(true)
@@ -293,7 +306,7 @@ fn node_view(ui: &mut egui::Ui, node: &Value, nav: &[Step], cache: &Cache) -> Op
                     body.rows(ROW_H, cache.rows.len(), |mut row| {
                         let (k, v) = entries[cache.rows[row.index()]];
                         row.col(|ui| {
-                            ui.label(k);
+                            field_name(ui, &scope, k);
                         });
                         row.col(|ui| {
                             ui.colored_label(DIM, explore::type_name(v));
@@ -317,9 +330,13 @@ fn node_view(ui: &mut egui::Ui, node: &Value, nav: &[Step], cache: &Cache) -> Op
                     h.col(|ui| {
                         ui.strong("#");
                     });
+                    let scope = explore::scope_of(nav);
                     for c in &cache.columns {
                         h.col(|ui| {
-                            ui.strong(c);
+                            match explore::label(&scope, c) {
+                                Some(l) => ui.strong(l).on_hover_text(c.as_str()),
+                                None => ui.strong(c),
+                            };
                         });
                     }
                 })

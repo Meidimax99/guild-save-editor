@@ -254,3 +254,69 @@ pub fn path_is_technical(root: &Value, path: &[Step]) -> bool {
     }
     false
 }
+
+/// The kind of record a path points into, e.g. `characters/list` for a
+/// character (indices are dropped).
+pub fn scope_of(path: &[Step]) -> String {
+    path.iter()
+        .filter_map(|s| match s {
+            Step::Key(k) => Some(k.as_str()),
+            Step::Index(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Human-readable names for fields whose meaning is known from the game's
+/// code. `scope` is [`scope_of`] the record's path. Fields not listed keep
+/// their raw name (`fXX` = in-memory offset).
+pub fn label(scope: &str, key: &str) -> Option<&'static str> {
+    Some(match (scope, key) {
+        // Header (`FUN_00507760` writes, `FUN_00521130`/`FUN_005783a0` read).
+        ("header", "flags") => "file type (5 save, 6 snapshot)",
+        ("header", "name") => "city",
+        ("header", "f31") => "human players",
+        ("header", "f32") => "game date",
+        ("header", "f40") => "owner first name",
+        ("header", "f50") => "owner last name",
+        ("header", "f60") => "owner profession, ?, ?",
+        ("header", "f63") => "owner religion",
+        ("header", "f64") => "owner coat of arms (+0x59a)",
+        ("header", "f6c") => "owner gender, ?",
+        ("header", "f78") => "player save checksums",
+        ("header", "thumbnail") => "thumbnail",
+        ("header", "description") => "save name",
+        // Globals.
+        ("globals", "g6438e4") => "next object id",
+        ("globals", "date") => "game date",
+        ("globals", "g71d088") => "next family id",
+        ("globals", "g71d08c") => "player dynasties",
+        ("globals", "g71d090") => "characters alive",
+        // Characters (`FUN_004f5860` creates them).
+        ("characters", "g71da90") => "local player (slot)",
+        ("characters/list", "id") => "slot",
+        ("characters/list", "f20c") => "attending session (id)",
+        ("characters/list", "f02") => "kind",
+        ("characters/list", "f04") => "object id",
+        ("characters/list", "f08") => "life (0 = dead)",
+        ("characters/list", "f09") => "gender (0 m, 1 f)",
+        ("characters/list", "f0a") => "age",
+        ("characters/list", "f0c") => "religion",
+        ("characters/list", "f30") => "first name",
+        ("characters/list", "f40") => "last name",
+        ("characters/list", "f50") => "family / dynasty id",
+        ("characters/list", "f54") => "coat of arms",
+        ("characters/list", "f58") => "generation",
+        ("characters/list", "f5c") => "family: spouse, ?, children (object ids)",
+        ("characters/list", "f80") => "appearance",
+        ("characters/list", "f164") => "profession, ?, ?",
+        // Dynasties.
+        ("dynasties", "id") => "dynasty id",
+        ("dynasties", "f02") => "name",
+        // Objects and buildings.
+        ("objects", "f02") => "object id",
+        ("buildings", "proto") => "prototype (A_Geb.dat)",
+        ("buildings", "f01") => "object id",
+        _ => return None,
+    })
+}
