@@ -21,12 +21,15 @@ pub struct Explorer {
     filter: String,
     error: Option<String>,
     cache: Option<Cache>,
+    /// Also show binary data, offsets and technical sections.
+    show_all: bool,
 }
 
 /// Rows/columns of the current table; rebuilt when the view or filter changes.
 struct Cache {
     nav: Vec<Step>,
     filter: String,
+    show_all: bool,
     columns: Vec<String>,
     rows: Vec<usize>,
 }
@@ -81,13 +84,17 @@ impl Explorer {
         };
 
         let mut go: Option<Vec<Step>> = None;
-        egui::Panel::left("explorer_sections").resizable(true).default_size(210.0).show(root, |ui| {
+        let mut show_all = self.show_all;
+        let side = egui::Panel::left("explorer_sections").resizable(true).default_size(210.0).show(root, |ui| {
             ui.add_space(4.0);
             ui.strong("Sections");
             ui.add_space(2.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if let Value::Object(m) = &data.root {
                     for (k, v) in m {
+                        if !self.show_all && explore::is_technical_section(k) {
+                            continue;
+                        }
                         let selected = matches!(self.nav.first(), Some(Step::Key(s)) if s == k);
                         let label = format!("{k}  ·  {}", explore::type_name(v));
                         if ui.selectable_label(selected, label).clicked() {
@@ -95,13 +102,15 @@ impl Explorer {
                         }
                     }
                 }
+                ui.allocate_space(ui.available_size());
             });
         });
+        side.response.context_menu(|ui| options_menu(ui, &mut show_all));
 
-        egui::CentralPanel::default().show(root, |ui| {
+        let central = egui::CentralPanel::default().show(root, |ui| {
             // Breadcrumb.
             ui.horizontal_wrapped(|ui| {
-                if ui.link("file").clicked() {
+                if ui.link("save").clicked() {
                     go = Some(Vec::new());
                 }
                 for (i, s) in self.nav.iter().enumerate() {
@@ -123,6 +132,7 @@ impl Explorer {
                 if !self.nav.is_empty() && ui.button("↑ up").clicked() {
                     go = Some(self.nav[..self.nav.len() - 1].to_vec());
                 }
+                ui.colored_label(DIM, if self.show_all { "showing everything" } else { "right-click for options" });
             });
             ui.separator();
 
@@ -130,9 +140,12 @@ impl Explorer {
                 ui.label("(path not found)");
                 return;
             };
-            let stale = self.cache.as_ref().is_none_or(|c| c.nav != self.nav || c.filter != self.filter);
+            let stale = self
+                .cache
+                .as_ref()
+                .is_none_or(|c| c.nav != self.nav || c.filter != self.filter || c.show_all != self.show_all);
             if stale {
-                self.cache = Some(build_cache(node, &self.nav, &self.filter));
+                self.cache = Some(build_cache(node, &self.nav, &self.filter, self.show_all));
             }
             let cache = self.cache.as_ref().unwrap();
             if let Some(next) = node_view(ui, node, &self.nav, cache) {
@@ -140,24 +153,44 @@ impl Explorer {
             }
         });
 
+        central.response.context_menu(|ui| options_menu(ui, &mut show_all));
+
         if let Some(nav) = go {
             self.nav = nav;
             self.filter.clear();
         }
+        if show_all != self.show_all {
+            self.show_all = show_all;
+            // Leave hidden data when switching back to the simple view.
+            if !show_all && let Some(d) = &self.data {
+                while !self.nav.is_empty() && explore::path_is_technical(&d.root, &self.nav) {
+                    self.nav.pop();
+                }
+                if self.nav.is_empty() {
+                    self.nav = vec![Step::Key("header".into())];
+                }
+            }
+        }
     }
+}
+
+fn options_menu(ui: &mut egui::Ui, show_all: &mut bool) {
+    ui.checkbox(show_all, "Show everything")
+        .on_hover_text("Also show binary data, file offsets and the technical sections (file, scene)");
 }
 
 fn matches(text: &str, filter: &str) -> bool {
     filter.is_empty() || text.to_lowercase().contains(filter)
 }
 
-fn build_cache(node: &Value, nav: &[Step], filter: &str) -> Cache {
+fn build_cache(node: &Value, nav: &[Step], filter: &str, show_all: bool) -> Cache {
     let f = filter.to_lowercase();
     let mut columns = Vec::new();
     let rows = match node {
         Value::Object(m) => m
             .iter()
             .enumerate()
+            .filter(|(_, (k, v))| show_all || !explore::is_technical_field(k, v))
             .filter(|(_, (k, v))| matches(k, &f) || matches(&explore::preview(v), &f))
             .map(|(i, _)| i)
             .collect(),
@@ -171,10 +204,18 @@ fn build_cache(node: &Value, nav: &[Step], filter: &str) -> Cache {
                     }
                 }
             }
+            if !show_all {
+                // Hide a column if it holds technical data in every sampled record.
+                columns.retain(|c| {
+                    a.iter().take(COLUMN_SAMPLE).any(|r| r.get(c).is_some_and(|v| !explore::is_technical_field(c, v)))
+                });
+            }
             a.iter()
                 .enumerate()
                 .filter(|(_, r)| match r {
-                    Value::Object(m) => f.is_empty() || m.values().any(|v| matches(&explore::preview(v), &f)),
+                    Value::Object(m) => {
+                        f.is_empty() || columns.iter().any(|c| m.get(c).is_some_and(|v| matches(&explore::preview(v), &f)))
+                    }
                     other => matches(&explore::preview(other), &f),
                 })
                 .map(|(i, _)| i)
@@ -186,7 +227,7 @@ fn build_cache(node: &Value, nav: &[Step], filter: &str) -> Cache {
         },
         _ => vec![0],
     };
-    Cache { nav: nav.to_vec(), filter: filter.to_owned(), columns, rows }
+    Cache { nav: nav.to_vec(), filter: filter.to_owned(), show_all, columns, rows }
 }
 
 fn short(s: String) -> String {

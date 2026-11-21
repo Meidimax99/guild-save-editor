@@ -217,3 +217,40 @@ pub fn int_readings(v: &Value) -> Option<String> {
     s += &format!("\nbytes {}", hex(&b));
     Some(s)
 }
+
+/// Top-level sections that are technical rather than editable content.
+pub fn is_technical_section(key: &str) -> bool {
+    matches!(key, "file" | "scene")
+}
+
+/// Fields hidden unless "show everything" is on: raw byte data that is not
+/// text, and file offsets.
+pub fn is_technical_field(key: &str, v: &Value) -> bool {
+    if key == "offset" || key.ends_with("_offset") || key == "len" {
+        return true;
+    }
+    match as_bytes(v) {
+        Some(b) => bytes_text(&b).is_none(),
+        None => false,
+    }
+}
+
+/// Whether a path step leads into hidden data.
+pub fn path_is_technical(root: &Value, path: &[Step]) -> bool {
+    let mut node = root;
+    for (i, s) in path.iter().enumerate() {
+        if let Step::Key(k) = s {
+            if i == 0 && is_technical_section(k) {
+                return true;
+            }
+        }
+        let Some(next) = get(node, std::slice::from_ref(s)) else { return false };
+        if let Step::Key(k) = s
+            && is_technical_field(k, next)
+        {
+            return true;
+        }
+        node = next;
+    }
+    false
+}

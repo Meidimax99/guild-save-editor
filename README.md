@@ -28,6 +28,10 @@ cargo build --release
 - Hover an integer to see it as hex, signed, float and raw bytes; many
   unnamed fields (`fXX` = in-memory offset) are floats or packed values.
 - **Filter** keeps the rows that contain the text in any field.
+- By default only fields that make sense to edit are shown. Raw byte data,
+  file offsets, and the technical sections (`file`, `scene`) are hidden.
+  Right-click the section list or the table and tick **Show everything** to
+  see them.
 
 ## GUI: editing every player's copy at once
 
