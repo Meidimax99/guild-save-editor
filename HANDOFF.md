@@ -117,17 +117,3 @@ instead of `TopBottomPanel`/`SidePanel`).
 - Commits end with the attribution line the harness provides; push only when asked.
 - When in doubt about scope, implement the obvious part and report briefly;
   the user answers in short messages.
-
-## Gotchas
-
-- `pkill -f guild-save-edit-gui` inside a shell command whose text contains
-  that name kills the shell itself (exit 144). Use
-  `pgrep -f 'release/guild-save-edit-gui' | xargs -r kill` as a separate
-  command, then start the GUI in another command with `setsid … &`.
-- Screenshots: no xdotool/xwininfo. Get the window id via
-  `i3-msg -t get_tree` (window name "Gilde Savegame Editor") and run
-  `maim -i <id> file.png`.
-- Ghidra decompile output for some functions has broken argument lists
-  (stack confusion); cross-check with `strings.tsv` xrefs.
-- The city-name header field (`0x05`, 32 bytes) contains leftover memory
-  after the NUL; ignore it when comparing copies.
