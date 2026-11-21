@@ -153,10 +153,9 @@ The tool edits both `.SAV` and `.SRV` so they stay consistent.
 
 ## What `to-ai` changes
 
-This mirrors what the game does with a player's character in `FUN_00527c60`:
+This follows what the game does with a player's character in `FUN_00527c60`, but keeps the character's identity and family:
 
 * The kind byte goes from `7` (or `6`) to `5` (AI).
-* The eight per-character action slots at `+0x5c` are reset to `-1`.
 * That character's pending notices that need a human decision are removed
   from the `.SAV` (kinds `0x11 0x2d 0x2e 0x30 0x35 0x41 0x42 0x46 0x4b 0x5a
   0x5b 0x5c 0x5d 0x60`; `--keep-notices` keeps them).

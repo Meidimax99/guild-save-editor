@@ -92,7 +92,7 @@ In memory: 0x21c-byte records in an array at `0x79cd40` (`g_characters`,
 | `+0x30` | first name (16 bytes) |
 | `+0x40` | last name (16 bytes) |
 | `+0x50` | dynasty id (`0x8000 + n`) |
-| `+0x5c` | 8 × u32 action/handle slots (reset to -1 when converting a player) |
+| `+0x5c` | 8 × u32 family links (object ids): spouse first, children from slot 2; a newborn's id is appended to its mother's list. -1 = empty |
 | `+0x20c` | id of the meeting/session (council, court) the character is attending, -1 if none. Stored right after the id in the file. **Not** a network slot |
 
 The characters section also stores `DAT_0071da90`, the **local player's
@@ -294,7 +294,7 @@ hat die Partie verlassen. Das Spiel wurde beendet…"). `FUN_00527c60`
 converts a human's character into an AI one:
 - kind → 5;
 - a new random first name and a new dynasty id;
-- the eight `+0x5c` slots set to -1;
+- the eight family links (`+0x5c`) set to -1, which detaches the new person from the old family;
 - that character's notices of kinds `0x11 0x2d 0x2e 0x30 0x35 0x41 0x42
   0x46 0x4b 0x5a 0x5b 0x5c 0x5d 0x60` cancelled (`FUN_0052c810`);
 - related meeting records (`0x9516e0`) closed.
@@ -305,10 +305,9 @@ If no living kind-6 character is left, it sets game over (`DAT_0071da74`).
 
 `to-ai` on one copy:
 1. Sets the character's kind from 6/7 to 5.
-2. Sets its eight `+0x5c` slots to -1.
-3. Removes its pending notices of the kinds listed in §6.6 from dynamic
+2. Removes its pending notices of the kinds listed in §6.6 from dynamic
    section 5 (`.SAV` only; `--keep-notices` keeps them).
-4. Sets header `+0x2e` (the human count) to the number of remaining kind 6/7
+3. Sets header `+0x2e` (the human count) to the number of remaining kind 6/7
    characters.
 
 Deliberately unchanged:
