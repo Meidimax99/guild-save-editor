@@ -36,13 +36,13 @@ world and city). Editing commands change **both files** unless you pass
 guild-save-edit info    saves/GILDE_SAVEGAME_2.SAV
 guild-save-edit players saves/GILDE_SAVEGAME_2.SAV
 
-#    id  role                     name                       dynasty          kind
-#     1  human player             Amadeus Abdomen            Abdomen          6  (local)
-#     3  human player             Pastorius Pinkelmann       Pinkelmann       6
-#     2  AI player                Ana Aalschleck             Aalschleck       7
-#   ...
+#    id  role                       name                       dynasty      kind
+#     1  human (owner of this file) Amadeus Abdomen            Abdomen      6
+#     2  human (other player)       Ana Aalschleck             Aalschleck   7
+#     3  human (other player)       Pastorius Pinkelmann       Pinkelmann   7
+#    26  AI player                  Karola Nepper              #0x8007      5
 
-# hand player 3 to the AI, writing a new save pair (MYGAME.SAV + MYGAME.SRV)
+# hand player 3 to the AI (do this in every remaining player's copy), writing a new pair (MYGAME.SAV + MYGAME.SRV)
 guild-save-edit to-ai saves/GILDE_SAVEGAME_2.SAV 3 -o saves/MYGAME.SAV
 
 # or edit in place (originals are kept as *.SAV.bak / *.SRV.bak)
