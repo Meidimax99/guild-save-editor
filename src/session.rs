@@ -375,23 +375,32 @@ impl Session {
         }
         let mut log = Vec::new();
         // Edit everything in memory first; write only if all edits succeed.
-        let mut edited: Vec<(SaveFile, PathBuf)> = Vec::new();
-        for c in self.all_copies() {
-            for f in c.files() {
-                let mut f = SaveFile { path: f.path.clone(), raw: f.raw.clone(), world: f.world.clone() };
-                for &id in to_ai {
-                    if f.character(id).is_ok_and(ops::is_human) {
-                        log.extend(ops::to_ai(&mut f, id, keep_notices).with_context(|| format!("editing {}", f.path.display()))?);
+        // In folder mode every player gets one folder, so identical twins
+        // (same player) are not written separately.
+        let mut edited: Vec<(SaveFile, Option<PathBuf>)> = Vec::new();
+        for c in &self.copies {
+            for (twin, copy) in std::iter::once((false, c)).chain(c.twins.iter().map(|t| (true, t))) {
+                for f in copy.files() {
+                    let mut f = SaveFile { path: f.path.clone(), raw: f.raw.clone(), world: f.world.clone() };
+                    for &id in to_ai {
+                        if f.character(id).is_ok_and(ops::is_human) {
+                            let lines = ops::to_ai(&mut f, id, keep_notices).with_context(|| format!("editing {}", f.path.display()))?;
+                            if !twin || out_dir.is_none() {
+                                log.extend(lines);
+                            }
+                        }
                     }
+                    let dst = match out_dir {
+                        None => Some(f.path.clone()),
+                        Some(_) if twin => None,
+                        Some(d) => Some(self.output_path(copy, &f.path, d)),
+                    };
+                    edited.push((f, dst));
                 }
-                let dst = match out_dir {
-                    None => f.path.clone(),
-                    Some(d) => self.output_path(c, &f.path, d),
-                };
-                edited.push((f, dst));
             }
         }
         for (f, dst) in &edited {
+            let Some(dst) = dst else { continue };
             if let Some(parent) = dst.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -401,10 +410,12 @@ impl Session {
         let mut it = edited.into_iter();
         let mut update = |c: &mut Copy| {
             let (sav, dst) = it.next().unwrap();
-            c.sav = SaveFile { path: dst, ..sav };
+            let path = dst.unwrap_or_else(|| sav.path.clone());
+            c.sav = SaveFile { path, ..sav };
             if c.srv.is_some() {
                 let (srv, dst) = it.next().unwrap();
-                c.srv = Some(SaveFile { path: dst, ..srv });
+                let path = dst.unwrap_or_else(|| srv.path.clone());
+                c.srv = Some(SaveFile { path, ..srv });
             }
         };
         for c in &mut self.copies {
@@ -416,17 +427,11 @@ impl Session {
         Ok(log)
     }
 
-    /// Mirror the scanned tree below `out`; files added from elsewhere go to
-    /// `out/added/<owner>/`.
+    /// `out/<player name>/<file name>`: one folder per player whose copy it is.
     fn output_path(&self, c: &Copy, file: &Path, out: &Path) -> PathBuf {
-        let name = file.file_name().unwrap_or_default();
-        match (&self.root, &c.rel) {
-            (Some(root), Some(_)) if file.starts_with(root) => out.join(file.strip_prefix(root).unwrap()),
-            _ => out.join("added").join(sanitize(&c.owner_name())).join(name),
-        }
+        out.join(sanitize(&c.owner_name())).join(file.file_name().unwrap_or_default())
     }
 }
-
 fn sanitize(s: &str) -> String {
     s.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect()
 }

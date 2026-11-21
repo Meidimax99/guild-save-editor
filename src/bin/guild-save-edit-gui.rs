@@ -388,7 +388,7 @@ impl App {
             });
             ui.horizontal(|ui| {
                 ui.label("Write to:");
-                ui.radio_value(&mut self.output, Output::Folder, "new folder (same structure)");
+                ui.radio_value(&mut self.output, Output::Folder, "new folder (one sub-folder per player)");
                 ui.radio_value(&mut self.output, Output::InPlace, "in place (originals kept as .bak)");
             });
             if self.output == Output::Folder {
@@ -439,14 +439,18 @@ impl App {
             .filter(|s| s.copy.is_none() && !self.to_ai.contains(&s.id))
             .map(|s| s.name.clone())
             .collect();
-        let files: usize = sess.all_copies().map(|c| 1 + c.srv.is_some() as usize).sum();
+        let count = |c: &session::Copy| 1 + c.srv.is_some() as usize;
+        let files: usize = match self.output {
+            Output::InPlace => sess.all_copies().map(count).sum(),
+            Output::Folder => sess.copies.iter().map(count).sum(),
+        };
         let mut go = None;
         egui::Window::new("Apply changes").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
             ui.label(format!("Hand to the AI: {}", names.join(", ")));
             ui.label(format!("Files to write: {files}"));
             ui.label(match self.output {
                 Output::InPlace => "Edited in place; originals are kept as .bak.".to_string(),
-                Output::Folder => format!("Written to {}", self.out_dir),
+                Output::Folder => format!("Written to {}/<player name>/", self.out_dir),
             });
             if !missing.is_empty() {
                 ui.add_space(4.0);

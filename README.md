@@ -37,9 +37,10 @@ guild-save-edit-gui [folder-or-save]
    - Not every player's copy has to be present.
 4. Tick **Hand to AI** for the players who left, then **Apply**. Every
    loaded copy (`.SAV` and `.SRV`) is edited the same way. The output goes
-   either in place (originals kept as `.bak`) or into a new folder with the
-   same structure as the scanned one. Files added from outside the scanned
-   folder go to `added/<player>/`.
+   either in place (originals kept as `.bak`) or into a new folder with one
+   sub-folder per player: `<out>/<player name>/NAME.SAV` and `.SRV`, ready
+   to send back to that player. Their game expects the files in
+   `Resources/gamedata/network/`.
 
 How a copy is identified:
 - **Owner:** the character of kind `6` in it, cross-checked against the
