@@ -96,14 +96,6 @@ impl SaveFile {
         Ok(old)
     }
 
-    /// Reset the eight `u32` slots at character `+0x5c` to -1, as the engine
-    /// does when converting a player.
-    pub fn clear_slots(&mut self, id: u16) -> Result<()> {
-        let off = self.character(id)?.f5c_offset;
-        self.raw[off..off + 32].fill(0xff);
-        Ok(())
-    }
-
     /// Walk the dynamic state up to the notice section (sections 1–5 of the
     /// savegame tail: `FUN_004e0d00`, `FUN_0050d8e0`, `FUN_0050d9b0`,
     /// `FUN_004db440`, `FUN_0050de20`).

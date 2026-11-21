@@ -201,7 +201,7 @@ pub struct Character {
     pub offset: usize,
     /// File offset of the kind byte (`+0x02`).
     pub kind_offset: usize,
-    /// File offset of the 8 × u32 slots at `+0x5c`.
+    /// File offset of the family links at `+0x5c` (8 × u32).
     pub f5c_offset: usize,
     pub id: u16,
     pub f20c: i32,

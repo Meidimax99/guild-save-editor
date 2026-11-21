@@ -89,7 +89,6 @@ pub fn to_ai(s: &mut SaveFile, id: u16, keep_notices: bool) -> Result<Vec<String
         ));
     }
     s.set_kind(id, KIND_AI)?;
-    s.clear_slots(id)?;
     if !s.is_snapshot() && !keep_notices {
         let sec = s.notices()?;
         let drop: Vec<usize> = sec
